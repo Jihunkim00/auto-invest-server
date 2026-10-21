@@ -73,7 +73,10 @@ def test_unresolved_orders_are_isolated_without_mutating_history(db_session, acc
     assert result['allowed'] is not blocked
     if blocked:
         reason = 'duplicate_open_order' if side == 'buy' else 'duplicate_open_sell_order'
+        if status in {'UNKNOWN_STALE', 'SYNC_FAILED'}:
+            reason = 'order_status_unverified'
         assert result['reason'] == result['block_reason'] == reason
+        assert result['order_status'] == status
         assert result['duplicate_check_source'] == 'local_db'
         assert result['matched_order_id'] == old.id
         assert result['matched_order_owner_user_id'] == old.owner_user_id
@@ -110,12 +113,14 @@ def test_broker_open_orders_block_and_read_the_verified_client(db_session, accou
     calls = []
     def open_orders():
         calls.append(getattr(client, 'user_id', None))
-        return [{'symbol': order.symbol, 'side': side}]
+        return [{'symbol': order.symbol, 'side': side, 'broker_order_id': 'FAKE-1234',
+                 'status': 'pending', 'remaining_quantity': 1, 'order_status_verified': True}]
     client.list_open_orders = open_orders
     result = _guard(KisAutomationExecutionCore(client), db_session, order)
     assert result['allowed'] is False
     assert result['duplicate_check_source'] == 'broker'
     assert result['requested_order_owner_user_id'] == order.owner_user_id
+    assert result['broker_order_id_masked'] == '***1234'
     assert calls == [order.owner_user_id]
 
 
@@ -230,13 +235,13 @@ def test_scheduler_block_links_run_order_and_reservation(db_session, fake_kis_ad
         return validate(request, **kwargs)
     validation.validate = introduce_unresolved_order
     result = service.run_once(db_session, [_candidate()], scheduler_slot='09:10', now=SLOT_NOW)
-    assert result['reason'] == 'duplicate_open_order'
+    assert result['reason'] == 'order_status_unverified'
     order = db_session.get(OrderLog, result['order_id'])
     reservation = db_session.get(AutomationProfileBuyReservation, result['reservation_id'])
     run = db_session.query(TradeRunLog).filter_by(order_id=order.id).one()
     assert reservation.order_id == order.id
     assert reservation.status == 'blocked'
-    assert reservation.block_reason == run.reason == 'duplicate_open_order'
+    assert reservation.block_reason == run.reason == 'order_status_unverified'
     assert json.loads(run.response_payload)['reservation_id'] == reservation.id
     assert json.loads(run.response_payload)['guard']['matched_order_id'] == previous[0].id
     assert json.loads(order.response_payload)['source_metadata']['reservation_id'] == reservation.id

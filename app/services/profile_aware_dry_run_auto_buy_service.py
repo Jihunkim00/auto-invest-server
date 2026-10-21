@@ -216,6 +216,9 @@ class ProfileAwareDryRunAutoBuyService:
                 **decision,
                 "reason": preview_failure_reason,
             }
+        from app.services.automation_run_diagnostics import record_gate
+        record_gate('ENTRY_DECISION', actual=decision, required={'action': 'would_buy'},
+                    reason=None if decision.get('action') == 'would_buy' else decision.get('reason'))
         response = self._response(
             request=payload,
             profile=profile,

@@ -51,6 +51,7 @@ from app.services.kis_snapshot_order_state import (
 )
 from app.services.automation_run_diagnostics import (
     capture_run, measure_stage, record_snapshot, record_position_management, record_preview,
+    new_trace, finish_trace, record_gate, set_gate_scope,
 )
 from app.services.account_snapshot_retry import (
     MAX_ATTEMPTS as ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
@@ -176,7 +177,6 @@ class UserAutoTradingCandidateService:
                     exc,
                 ) from exc
             preview = preview if isinstance(preview, dict) else {}
-            record_preview(preview)
             lineage = _canonical_pipeline_lineage(
                 preview,
                 snapshot_items=snapshot.get("items") or [],
@@ -1221,18 +1221,33 @@ class UserAutoTradingSchedulerService:
     def _process_user(
         self, db: Session, **kwargs: Any,
     ) -> dict[str, Any]:
-        trace = {'stages': {}, 'stage_durations_ms': {},
-                 'started_at': self.now_provider().isoformat(),
-                 'thresholds': {'c_min': A_TOP5_C_MIN_SCORE, 'gpt_min': A_TOP5_GPT_MIN_BUY_SCORE,
-                                'final_min': BUY_FINAL_MIN}}
+        trace = new_trace(owner_user_id=kwargs['user'].id,
+            scheduler_slot=kwargs['scheduler_slot'], now_provider=self.now_provider)
+        trace['thresholds'] = {'c_min': A_TOP5_C_MIN_SCORE, 'gpt_min': A_TOP5_GPT_MIN_BUY_SCORE,
+                               'final_min': BUY_FINAL_MIN}
         started = time.perf_counter()
         with capture_run(trace):
+            record_gate('SCHEDULER', actual=kwargs['scheduler_slot'], required='claimed current account slot')
             try:
                 result = self._process_user_inner(db, **kwargs)
             except Exception as exc:
                 trace['stage_durations_ms']['total'] = round((time.perf_counter() - started) * 1000, 3)
+                failed_stage = trace.get('first_failure_stage') or 'scheduler'
+                failed_gate = {'account_snapshot': 'KIS_SNAPSHOT', 'position_management': 'POSITION',
+                    'profile_watchlist': 'WATCHLIST', 'gpt': 'GPT_COMPLETION'}.get(failed_stage, failed_stage.upper())
+                cause = getattr(exc, 'cause', exc)
+                details = getattr(cause, 'details', {})
+                safe_failure = {'exception_type': type(cause).__name__, **{
+                    key: details[key] for key in ('error_type', 'read_operation', 'http_status', 'rt_cd', 'msg_cd')
+                    if isinstance(details, dict) and key in details}}
+                record_gate(failed_gate, status='FAILED', actual=safe_failure,
+                    required={'stage_completed': True}, reason=safe_failure.get('error_type') or
+                    (str(cause) if str(cause).isidentifier() else type(cause).__name__),
+                    detail=type(cause).__name__, stage=failed_stage)
+                finish_trace(trace, {'result': 'failed', 'reason': str(exc)})
                 exc.run_diagnostics = trace
                 raise
+            finish_trace(trace, result)
         trace['stage_durations_ms']['total'] = round((time.perf_counter() - started) * 1000, 3)
         context = result.get('profile_context') or {}
         calendar = result.get('calendar_gap_risk') or context.get('calendar_gap_risk') or {}
@@ -1254,7 +1269,7 @@ class UserAutoTradingSchedulerService:
                     if marker in reason:
                         blocked_stage = stage
                         break
-            trace['first_blocked_stage'] = trace.get('first_failure_stage') or blocked_stage or trace.get('final_stage')
+            trace['first_blocked_stage'] = trace.get('first_blocked_stage') or trace.get('first_failure_stage') or blocked_stage or trace.get('final_stage')
         result['run_diagnostics'] = trace
         run = db.get(TradeRunLog, result['run_id']) if result.get('run_id') else None
         if run is not None:
@@ -1287,6 +1302,7 @@ class UserAutoTradingSchedulerService:
                     now=now,
                 )
         profile = (profile_schedule or {}).get('profile') or {}
+        set_gate_scope(profile.get('id'))
         if (
             not profile_schedule
             or profile_schedule.get('status') != 'active'
@@ -1304,6 +1320,9 @@ class UserAutoTradingSchedulerService:
 
         with _scheduler_stage('live_gate'):
             gate_reason = self._live_gate_reason(settings, provider)
+            record_gate('ACCOUNT_AUTHORITY', actual={'enabled': settings.enabled,
+                'auto_trading_enabled': settings.auto_trading_enabled, 'kill_switch': settings.kill_switch},
+                required='enabled, confirmed live KIS account; kill switch off', reason=gate_reason)
         if gate_reason:
             return self._record_result(
                 db,
@@ -1318,6 +1337,8 @@ class UserAutoTradingSchedulerService:
             )
         with _scheduler_stage('market_session'):
             session = self.session_service.get_session_status(market, now=now)
+            record_gate('MARKET_SESSION', actual=session, required={'is_market_open': True},
+                        reason=None if session.get('is_market_open') is True else 'market_closed')
         if session.get('is_market_open') is not True:
             return self._record_result(
                 db,
@@ -1392,12 +1413,25 @@ class UserAutoTradingSchedulerService:
                 symbol=str(position_result.get('symbol') or 'NONE'),
                 position_management=position_result,
             )
+        from app.services.automation_entry_safety import snapshot_block_reason
+        snapshot_reason = snapshot_block_reason(snapshot, now=self.now_provider())
+        record_gate('KIS_SNAPSHOT', actual={'fetched_at': snapshot.get('fetched_at'),
+            'positions_reliable': snapshot.get('positions_reliable'), 'positions': snapshot.get('positions'),
+            'account': snapshot.get('account')}, required={'max_age_seconds': 10, 'positions_reliable': True},
+            reason=snapshot_reason)
+        if snapshot_reason:
+            return self._record_result(db, user=user, provider=provider, market=market,
+                scheduler_slot=scheduler_slot, run_key=run_key, result='HOLD', reason=snapshot_reason, symbol='NONE')
         effective_profile = profile.get('effective_settings')
         effective_profile = effective_profile if isinstance(effective_profile, dict) else {}
         entry_settings = effective_profile.get('entry')
         entry_settings = entry_settings if isinstance(entry_settings, dict) else {}
         cutoff = entry_settings.get('no_new_entry_after') or settings.no_new_entry_after
         past_cutoff = self.execution_service._past_user_cutoff(cutoff, session)
+        record_gate('ENTRY_WINDOW', actual={'is_entry_allowed_now': session.get('is_entry_allowed_now'),
+            'local_time': session.get('local_time'), 'past_cutoff': past_cutoff},
+            required={'no_new_entry_after': cutoff, 'is_entry_allowed_now': True},
+            reason='entry_window_closed' if session.get('is_entry_allowed_now') is not True or past_cutoff else None)
         if session.get('is_entry_allowed_now') is not True or past_cutoff:
             return self._record_result(
                 db,
@@ -2314,10 +2348,16 @@ class UserAutoTradingSchedulerService:
                     or snapshot.get('provider') != 'kis' or snapshot.get('market') != 'KR'
                     or snapshot.get('broker_account_id') != expected
                     or snapshot.get('environment') not in {'paper', 'live'}):
+                record_gate('ACCOUNT_SCOPE', actual={'owner_user_id': (snapshot or {}).get('owner_user_id')},
+                            required={'owner_user_id': user.id}, reason='account_scope_mismatch')
                 raise ValueError('account_scope_mismatch')
             credential = db.query(UserBrokerCredential.environment).filter_by(user_id=user.id, provider='kis').first()
             if credential is not None and snapshot['environment'] != credential.environment:
+                record_gate('ACCOUNT_SCOPE', reason='account_scope_mismatch')
                 raise ValueError('account_scope_mismatch')
+            record_gate('ACCOUNT_SCOPE', actual={'owner_user_id': snapshot['owner_user_id'],
+                'broker_account_id': snapshot['broker_account_id'], 'environment': snapshot['environment']},
+                required={'owner_user_id': user.id, 'broker_account_id': expected})
             positions = snapshot.get('positions')
             if (snapshot.get('positions_reliable') is not True or not isinstance(positions, list)
                     or any(not isinstance(item, dict) for item in positions)):

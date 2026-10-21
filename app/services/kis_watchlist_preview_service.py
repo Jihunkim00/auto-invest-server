@@ -1022,6 +1022,8 @@ class KisWatchlistPreviewService:
                 trigger_source=trigger_source,
                 market_regime_context=market_regime_context,
             )
+        from app.services.automation_run_diagnostics import record_preview
+        record_preview(payload)
         return payload
 
     def _run_shadow_b(

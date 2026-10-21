@@ -1,0 +1,205 @@
+{
+  "checked_at": "2026-10-21T15:41:51.286971+00:00",
+  "database_mode": "ro/query_only",
+  "database_write_count": 0,
+  "actual_kis_submit_count": 0,
+  "local_order": {
+    "id": 14,
+    "owner_user_id": 2,
+    "broker": "kis",
+    "market": "KR",
+    "symbol": "028670",
+    "side": "sell",
+    "order_type": "market",
+    "qty": 5.0,
+    "requested_qty": 5.0,
+    "filled_qty": 0.0,
+    "remaining_qty": 5.0,
+    "internal_status": "UNKNOWN_STALE",
+    "broker_status": "submitted",
+    "broker_order_status": "not_found_in_inquiry",
+    "sync_error": "kis_order_not_found_in_inquiry",
+    "profile_id": null,
+    "profile_key": null,
+    "created_at_kst": "2026-10-14T11:30:21+09:00",
+    "submitted_at_kst": "2026-10-14T11:30:21.621677+09:00",
+    "filled_at_kst": null,
+    "last_synced_at_kst": "2026-10-19T17:12:17.794338+09:00",
+    "broker_order_id_masked": "***2100",
+    "trigger_source": "user_scheduler",
+    "request": {
+      "provider": "kis",
+      "mode": "alpaca_live",
+      "trigger_source": "user_scheduler",
+      "authorization_mode": "automatic",
+      "scheduler_slot": "11:30",
+      "exit_reason": "take_profit_triggered",
+      "signal_id": 78
+    },
+    "response": {
+      "status": "submitted",
+      "filled_qty": 0.0,
+      "submitted_at": "2026-10-14 02:30:21.621677+00:00"
+    }
+  },
+  "user": {
+    "id": 2,
+    "username": "test01",
+    "role": "user"
+  },
+  "linked_runs": [
+    {
+      "id": 186,
+      "owner_user_id": 2,
+      "mode": "live",
+      "result": "submitted",
+      "reason": "user_exit_order_submitted",
+      "trigger_source": "user_scheduler",
+      "real_order_submitted": true,
+      "broker_submit_called": true,
+      "scheduler_slot": "11:30"
+    }
+  ],
+  "history": {
+    "status": "VERIFIED_READ",
+    "complete": true,
+    "owner_user_id": 2,
+    "start_date": "20261014",
+    "end_date": "20261022",
+    "tr_id": "TTTC0081R",
+    "exchange": "ALL",
+    "pages": 1,
+    "total_orders": 1,
+    "exact_matches": [
+      {
+        "ord_dt": "20261014",
+        "ord_tmd": "113021",
+        "pdno": "028670",
+        "sll_buy_dvsn_cd": "01",
+        "ord_qty": "5",
+        "tot_ccld_qty": "5",
+        "rmn_qty": "0",
+        "psbl_qty": null,
+        "cncl_yn": "",
+        "rjct_qty": "0",
+        "ord_dvsn_cd": "01",
+        "ord_dvsn_name": "시장가",
+        "tot_ccld_amt": "35350",
+        "avg_prvs": "7070",
+        "excg_dvsn_cd": "02",
+        "order_no_masked": "***2100"
+      }
+    ],
+    "same_symbol_orders": [
+      {
+        "ord_dt": "20261014",
+        "ord_tmd": "113021",
+        "pdno": "028670",
+        "sll_buy_dvsn_cd": "01",
+        "ord_qty": "5",
+        "tot_ccld_qty": "5",
+        "rmn_qty": "0",
+        "psbl_qty": null,
+        "cncl_yn": "",
+        "rjct_qty": "0",
+        "ord_dvsn_cd": "01",
+        "ord_dvsn_name": "시장가",
+        "tot_ccld_amt": "35350",
+        "avg_prvs": "7070",
+        "excg_dvsn_cd": "02",
+        "order_no_masked": "***2100"
+      }
+    ],
+    "buy_order_count": 0,
+    "absence_is_not_proof_of_never_submitted": true
+  },
+  "credential_metadata": {
+    "user_id": 2,
+    "provider": "kis",
+    "environment": "live",
+    "created_at": "2026-09-11 10:05:57",
+    "updated_at": "2026-09-11 10:05:57"
+  },
+  "current_snapshot": {
+    "positions_reliable": true,
+    "open_orders_reliable": true,
+    "positions_count": 0,
+    "open_orders_count": 0
+  },
+  "reconciliation_proposal": {
+    "order_id": 14,
+    "owner_user_id": 2,
+    "expected_fingerprint": "cd015b1ae9e15a381b49dc09d34b600d6cc39f3274d9afc8e104fbccee5cdd66",
+    "from_status": "UNKNOWN_STALE",
+    "to_status": "FILLED",
+    "filled_qty": 5.0,
+    "remaining_qty": 0.0,
+    "avg_fill_price": 7070.0,
+    "broker_order_id_masked": "***2100",
+    "verified_at": "2026-10-21T15:41:52.883332+00:00",
+    "history": {
+      "ord_dt": "20261014",
+      "ord_tmd": "113021",
+      "pdno": "028670",
+      "sll_buy_dvsn_cd": "01",
+      "ord_qty": "5",
+      "tot_ccld_qty": "5",
+      "rmn_qty": "0",
+      "rjct_qty": "0",
+      "cncl_yn": "",
+      "avg_prvs": "7070"
+    },
+    "history_complete": true,
+    "requires_user_approval": true,
+    "original_submission_payloads_preserved": true,
+    "broker_submit_called": false
+  },
+  "transport_calls": [
+    {
+      "method": "POST",
+      "path": "/oauth2/tokenP"
+    },
+    {
+      "method": "GET",
+      "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+      "tr_id": "TTTC0081R"
+    },
+    {
+      "method": "GET",
+      "path": "/uapi/domestic-stock/v1/trading/inquire-balance",
+      "tr_id": "TTTC8434R"
+    },
+    {
+      "method": "GET",
+      "path": "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
+      "tr_id": "TTTC0084R"
+    }
+  ],
+  "requires_user_approval_before_any_database_change": true,
+  "linked_signal": {
+    "id": 78,
+    "owner_user_id": 2,
+    "symbol": "028670",
+    "action": "sell",
+    "signal_status": "submitted",
+    "trigger_source": "user_scheduler",
+    "related_order_id": 14,
+    "created_at": "2026-10-14 02:30:21",
+    "approved_by_risk": 1
+  },
+  "local_position_lifecycle_count": 0,
+  "local_followup_checked_at": "2026-10-21T15:51:19.770626+00:00",
+  "historical_inquiry_summary": {
+    "provider": "kis",
+    "environment": "prod",
+    "start_date": "2026-10-14",
+    "end_date": "2026-10-14",
+    "count": 0,
+    "raw_status": "ok",
+    "raw_summary": {
+      "rt_cd": "0",
+      "msg_cd": "KIOK0560",
+      "has_output": false
+    }
+  }
+}

@@ -27,6 +27,7 @@ from app.services.kis_order_validation_service import (
     record_kis_order_validation,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.automation_run_diagnostics import observe_gate, record_gate
 
 
 class KisAutomationExecutionCore:
@@ -582,8 +583,19 @@ class KisAutomationExecutionCore:
                 check_scheduler_watchlist_ready(db, self.now_provider())
             except SchedulerTaskExpired as exc:
                 return self._blocked(db, order, {'allowed': False, 'reason': str(exc)})
+            from app.services.automation_entry_safety import global_buy_block_reason, account_buy_block_reason
+            reason = account_buy_block_reason(db, owner_user_id=order.owner_user_id) or global_buy_block_reason(db)
+            if reason:
+                return self._blocked(db, order, {'allowed': False, 'reason': reason})
+            record_gate('SUBMIT_SAFETY', actual={'quantity': qty, 'authority': authority},
+                        required='fresh possible order, watchlist, current slot and live authority')
         try:
             response = submitter()
+            if side == 'buy':
+                acknowledged = isinstance(response, dict) and bool(_broker_order_id(response))
+                record_gate('BROKER_BUY', actual={'symbol': symbol, 'quantity': qty,
+                    'broker_acknowledged': acknowledged}, required='broker acknowledgment',
+                    status='PASS' if acknowledged else 'FAILED', reason=None if acknowledged else 'broker_order_id_missing')
 
         except Exception as exc:
             error = _error(exc)
@@ -725,6 +737,7 @@ class KisAutomationExecutionCore:
             "guard": guard,
         }
 
+    @observe_gate('BROKER_PREFLIGHT', allowed_key='allowed')
     def _buy_jit_guard(
         self,
         db: Session,
@@ -1100,9 +1113,20 @@ class KisAutomationExecutionCore:
     ) -> dict[str, Any] | None:
         reason = 'duplicate_open_order' if side == 'buy' else 'duplicate_open_sell_order'
         diagnostics = {'requested_order_owner_user_id': order.owner_user_id}
-        if _has_open_order(open_orders, symbol, side):
+        if side == 'buy':
+            from app.services.kis_snapshot_order_state import broker_order_block
+            block = broker_order_block({'open_orders': open_orders})
+            if block:
+                return {'allowed': False, **block, 'block_reason': block['reason'], **diagnostics}
+        matched_broker = next((item for item in open_orders if _has_open_order([item], symbol, side)), None)
+        if matched_broker is not None:
             return {'allowed': False, 'reason': reason, 'block_reason': reason,
-                    'duplicate_check_source': 'broker', **diagnostics}
+                    'duplicate_check_source': 'broker',
+                    'broker_order_id_masked': '***' + str(matched_broker.get('broker_order_id') or
+                        matched_broker.get('order_id') or matched_broker.get('odno') or '')[-4:],
+                    'symbol': symbol, 'side': side, 'order_status': matched_broker.get('status'),
+                    'remaining_quantity': matched_broker.get('remaining_quantity'),
+                    'matched_order_owner_user_id': order.owner_user_id, **diagnostics}
         try:
             matched = _has_db_open_order(
                 db, symbol=symbol, side=side, scope=scope, exclude_order_id=order.id,
@@ -1111,8 +1135,11 @@ class KisAutomationExecutionCore:
             return {'allowed': False, 'reason': str(exc), 'block_reason': str(exc),
                     'duplicate_check_source': 'local_db', **diagnostics}
         if matched is not None:
+            if matched.internal_status in {'UNKNOWN_STALE', 'SYNC_FAILED'}:
+                reason = 'order_status_unverified'
             return {'allowed': False, 'reason': reason, 'block_reason': reason,
                     'duplicate_check_source': 'local_db', 'matched_order_id': matched.id,
+                    'order_status': matched.internal_status, 'remaining_quantity': matched.remaining_qty,
                     'matched_order_owner_user_id': matched.owner_user_id, **diagnostics}
         return None
 
@@ -1378,6 +1405,11 @@ def _has_open_order(
     ).strip().upper()
 
     for item in values:
+        status = str(item.get('status') or '').upper()
+        if status in {'FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED', 'INACTIVE'}:
+            continue
+        if item.get('remaining_quantity') == 0:
+            continue
         if _symbol(item) != normalized:
             continue
 

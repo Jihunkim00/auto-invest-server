@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.strategy_risk import StrategyEntryRiskEvaluationRequest
 from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
+from app.services.automation_run_diagnostics import observe_gate
 
 
 class TargetAwareRiskService:
@@ -31,6 +32,7 @@ class TargetAwareRiskService:
             profile_name=profile_name,
         )
 
+    @observe_gate('ACCOUNT_RISK', allowed_key='approved', stage='risk_engine')
     def evaluate_entry(
         self,
         db: Session,
@@ -126,6 +128,13 @@ class TargetAwareRiskService:
         recommended = max(0.0, cap * multiplier)
         base_notional = cap if requested_krw is None else min(max(requested_krw, 0.0), cap)
         approved_notional = max(0.0, base_notional * multiplier)
+        if side == 'buy' and approved_notional <= 0:
+            reason = ('buying_power_unavailable' if snapshot.get('available_cash_krw') is not None
+                and _float(snapshot.get('available_cash_krw')) <= 0 else 'risk_adjusted_notional_zero')
+            block_reason = block_reason or reason
+            flags.append(reason)
+            checks.append(_check('positive_buy_notional', False,
+                f'Approved BUY notional {approved_notional}; cash {snapshot.get("available_cash_krw")}.', severity='block'))
         if requested_krw is not None and cap > 0 and requested_krw > cap:
             flags.append('notional_capped_by_account' if str(snapshot.get('order_cap_source') or '').startswith('account_')
                          else 'notional_capped_by_profile')

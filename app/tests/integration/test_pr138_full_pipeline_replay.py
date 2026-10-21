@@ -95,6 +95,7 @@ def setup_pipeline(db, monkeypatch, *, gpt_score=70, failure=False,
     harness = build_harness(db, monkeypatch, now=start_at, analysis_times=analysis_times,
                             candidates=[candidate(price=10442.02)])
     install_real_lifecycle_wiring(harness, monkeypatch)
+    harness.profile_buy.target_risk_service.budget_service.now_provider = harness.clock.now
     settings = harness.client.settings
     monkeypatch.setattr(settings, 'kis_enabled', True)
     monkeypatch.setattr(settings, 'kis_real_order_enabled', True)

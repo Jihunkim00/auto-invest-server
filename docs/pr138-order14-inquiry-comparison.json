@@ -1,0 +1,59 @@
+{
+  "checked_at": "2026-10-21T15:57:45.714168+00:00",
+  "results": [
+    {
+      "tr_id": "TTTC0081R",
+      "exchange": "KRX",
+      "owner_user_id": 2,
+      "status": "VERIFIED_READ",
+      "complete": true,
+      "pages": 1,
+      "total_orders": 1,
+      "order14_match_count": 1
+    },
+    {
+      "tr_id": "TTTC8001R",
+      "exchange": "OMITTED_DEFAULT",
+      "owner_user_id": 2,
+      "status": "VERIFIED_READ",
+      "complete": true,
+      "pages": 1,
+      "total_orders": 1,
+      "order14_match_count": 1
+    },
+    {
+      "tr_id": "TTTC8001R",
+      "exchange": "ALL",
+      "owner_user_id": 2,
+      "status": "VERIFIED_READ",
+      "complete": true,
+      "pages": 1,
+      "total_orders": 1,
+      "order14_match_count": 1
+    }
+  ],
+  "transport_calls": [
+    {
+      "method": "POST",
+      "path": "/oauth2/tokenP"
+    },
+    {
+      "method": "GET",
+      "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+      "tr_id": "TTTC0081R"
+    },
+    {
+      "method": "GET",
+      "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+      "tr_id": "TTTC8001R"
+    },
+    {
+      "method": "GET",
+      "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+      "tr_id": "TTTC8001R"
+    }
+  ],
+  "actual_kis_submit_count": 0,
+  "database_write_count": 0,
+  "historical_root_cause": "unconfirmed_without_original_request_parameters"
+}

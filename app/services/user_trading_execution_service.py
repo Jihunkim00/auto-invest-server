@@ -10,7 +10,8 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.services.automation_run_diagnostics import measure_stage
+from app.services.automation_run_diagnostics import measure_stage, record_gate, observe_gate
+from app.services.automation_entry_safety import global_buy_block_reason, account_buy_block_reason, snapshot_block_reason
 from app.services.kis_snapshot_order_state import broker_order_block
 from app.services.scheduler_task_supervisor import (
     SchedulerTaskExpired, check_scheduler_buy_allowed, check_scheduler_watchlist_ready,
@@ -427,6 +428,7 @@ class UserTradingExecutionService:
                 provider=normalized_provider,
                 market=market,
                 as_of=now_utc,
+                symbol=requested_symbol,
             )
         risk = dict(risk or {})
         risk_flags = [str(flag) for flag in risk.get("risk_flags") or []]
@@ -455,6 +457,10 @@ class UserTradingExecutionService:
         risk["risk_flags"] = _dedupe(risk_flags)
         risk["risk_allowed"] = not risk["risk_flags"]
         base["risk"] = risk
+        record_gate('ACCOUNT_SNAPSHOT_RISK', actual={'risk_flags': risk['risk_flags'],
+            'account': snapshot.get('account'), 'duplicate_evidence': duplicate_check},
+            required='cash available; no duplicate, position capacity or session restriction',
+            reason=risk['risk_flags'][0] if risk['risk_flags'] else None, stage='risk_engine')
 
         if risk["risk_flags"]:
             return self._finish_blocked(
@@ -560,6 +566,10 @@ class UserTradingExecutionService:
                 reason=str(analysis.get("reason") or "hold_signal"),
             )
 
+        global_reason = global_buy_block_reason(db) if normalized_provider == 'kis' else None
+        if global_reason:
+            return self._finish_blocked(db, run, user=user, base=base,
+                reason=global_reason, analysis=analysis, risk=risk)
         price = _number(analysis.get("current_price") or (analysis.get("indicator_payload") or {}).get("price"))
         if is_automatic and isinstance(profile_context, dict) and profile_context.get("profile_id") is not None:
             sizing = self._size_profile_order(
@@ -586,6 +596,8 @@ class UserTradingExecutionService:
             )
         base["profile_context"] = profile_context
         base["sizing"] = sizing
+        record_gate('SIZING', actual=sizing, required={'quantity': '>=1', 'cash_only': True},
+                    reason=sizing.get('reason'))
         if sizing.get("reason"):
             return self._finish_blocked(
                 db,
@@ -1086,6 +1098,9 @@ class UserTradingExecutionService:
         try:
             with AccountTradingLimitService().buy_execution_claim(db, owner_user_id=int(user.id)):
                 check_scheduler_buy_allowed()
+                reason = global_buy_block_reason(db)
+                if reason:
+                    raise AccountTradingLimitError(reason)
                 db.refresh(user)
                 settings = self._settings(db, user)
                 db.refresh(settings)
@@ -1100,6 +1115,9 @@ class UserTradingExecutionService:
                     raise AccountTradingLimitError('account_snapshot_unavailable')
                 if fresh.get('owner_user_id', int(user.id)) != int(user.id) or fresh.get('provider', 'kis') != 'kis':
                     raise AccountTradingLimitError('account_scope_mismatch')
+                reason = snapshot_block_reason(fresh, now=self.now_provider())
+                if reason:
+                    raise AccountTradingLimitError(reason)
                 profile_context = base.get('profile_context')
                 if isinstance(profile_context, dict) and profile_context.get('profile_id'):
                     from app.services.automation_profile_service import AutomationProfileService
@@ -1143,6 +1161,7 @@ class UserTradingExecutionService:
                     raise AccountTradingLimitError(flags[0])
                 fresh_risk = self.risk_service.get_user_risk_state(
                     db, user, provider='kis', market='KR', as_of=kwargs['now'],
+                    symbol=base['requested_symbol'],
                 )
                 if fresh_risk.get('risk_flags'):
                     raise AccountTradingLimitError(str(fresh_risk['risk_flags'][0]))
@@ -1169,6 +1188,8 @@ class UserTradingExecutionService:
                 kwargs['credentials'] = credentials
                 return self._submit_kis_live_with_claim(db, run, **kwargs)
         except (AccountTradingLimitError, SchedulerTaskExpired) as exc:
+            record_gate('SUBMIT_SAFETY', reason=str(exc), actual={'reason': str(exc)},
+                        required='fresh account/risk/profile/authority within current slot')
             return self._finish_blocked(db, run, user=user, base=base, reason=str(exc),
                                         analysis=kwargs['analysis'], risk=kwargs['risk'])
         except Exception:
@@ -1273,15 +1294,29 @@ class UserTradingExecutionService:
             check_scheduler_buy_allowed()
             check_scheduler_watchlist_ready(db, self.now_provider())
             if authorization_mode == 'automatic' and time.monotonic() - sizing.get('possible_order_checked_clock', 0) > 10:
+                record_gate('SUBMIT_SAFETY', reason='possible_order_snapshot_stale', required={'max_age_seconds': 10})
                 order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
                 db.commit()
                 return self._finish_blocked(db, run, user=user, base=base,
                     reason='possible_order_snapshot_stale', analysis=analysis, risk=risk)
+            reason = account_buy_block_reason(db, owner_user_id=user.id) or global_buy_block_reason(db)
+            if reason:
+                order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+                db.commit()
+                return self._finish_blocked(db, run, user=user, base=base,
+                    reason=reason, analysis=analysis, risk=risk)
+            record_gate('SUBMIT_SAFETY', actual={'quantity': submit_quantity},
+                        required='fresh possible order, watchlist, execution authority and slot')
             broker_called = True
             broker_order = client.submit_market_buy_qty(
                 symbol=base["requested_symbol"],
                 qty=submit_quantity,
             )
+            acknowledged = bool(_broker_value(broker_order, 'id'))
+            record_gate('BROKER_BUY', actual={'symbol': base['requested_symbol'], 'quantity': submit_quantity,
+                        'status': _broker_value(broker_order, 'status')}, required='broker acknowledgment',
+                        status='PASS' if acknowledged else 'FAILED',
+                        reason=None if acknowledged else 'broker_order_id_missing')
             self._apply_broker_order(db, order, broker_order)
             status_value = str(order.internal_status or "").upper()
             real_submitted = status_value not in {
@@ -1377,6 +1412,7 @@ class UserTradingExecutionService:
             }
             return self._finish_run(db, run, response)
 
+    @observe_gate('BROKER_PREFLIGHT')
     def _preflight_kis_automatic_buy(self, db, *, user, credentials, symbol, sizing,
                                      fresh_positions=None, profile_context=None):
         query_started = self.now_provider()
@@ -1909,18 +1945,31 @@ class UserTradingExecutionService:
             if status not in {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "FILLED", "INACTIVE"}:
                 risk_flags.append("duplicate_open_order")
                 duplicate_check = {'duplicate_check_source': 'broker',
-                    'requested_order_owner_user_id': user.id, 'block_reason': 'duplicate_open_order'}
+                    'requested_order_owner_user_id': user.id, 'matched_order_owner_user_id': user.id,
+                    'broker_order_id_masked': '***' + str(item.get('broker_order_id') or item.get('id') or '')[-4:],
+                    'symbol': symbol, 'side': item.get('side'), 'order_status': status,
+                    'remaining_quantity': item.get('remaining_quantity'), 'block_reason': 'duplicate_open_order'}
                 break
 
         local_rows = (
             db.query(OrderLog)
-            .filter(OrderLog.owner_user_id == int(user.id), OrderLog.symbol == symbol)
+            .filter(OrderLog.owner_user_id == int(user.id), OrderLog.symbol == symbol,
+                    OrderLog.broker == snapshot.get('provider', 'kis'),
+                    (OrderLog.market == snapshot.get('market', 'KR')) | OrderLog.market.is_(None))
             .order_by(OrderLog.id.desc())
             .limit(10)
             .all()
         )
-        if any(str(row.internal_status or "").upper() not in _TERMINAL_ORDER_STATUSES for row in local_rows):
-            risk_flags.append("duplicate_open_order")
+        matched_local = next((row for row in local_rows
+            if str(row.internal_status or '').upper() not in _TERMINAL_ORDER_STATUSES), None)
+        if matched_local is not None:
+            local_reason = ('order_status_unverified' if matched_local.internal_status in
+                {'UNKNOWN_STALE', 'SYNC_FAILED'} else 'duplicate_open_order')
+            risk_flags.append(local_reason)
+            duplicate_check = {'duplicate_check_source': 'local_db', 'matched_order_id': matched_local.id,
+                'matched_order_owner_user_id': matched_local.owner_user_id,
+                'requested_order_owner_user_id': user.id, 'order_status': matched_local.internal_status,
+                'block_reason': local_reason}
 
         if snapshot.get('provider') == 'kis' and snapshot.get('environment') == 'live':
             try:
@@ -1929,11 +1978,14 @@ class UserTradingExecutionService:
                 risk_flags.append(str(exc))
             else:
                 if matched is not None:
-                    risk_flags.append('duplicate_open_order')
+                    matched_reason = ('order_status_unverified' if matched.internal_status in
+                        {'UNKNOWN_STALE', 'SYNC_FAILED'} else 'duplicate_open_order')
+                    risk_flags.append(matched_reason)
                     if duplicate_check is None:
                         duplicate_check = {'duplicate_check_source': 'local_db', 'matched_order_id': matched.id,
                             'matched_order_owner_user_id': matched.owner_user_id,
-                            'requested_order_owner_user_id': user.id, 'block_reason': 'duplicate_open_order'}
+                            'requested_order_owner_user_id': user.id, 'order_status': matched.internal_status,
+                            'block_reason': matched_reason}
 
         buying_power = _number(account.get("buying_power") if account.get("buying_power") is not None else account.get("cash"))
         if buying_power is None or buying_power <= 0:

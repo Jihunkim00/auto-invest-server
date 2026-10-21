@@ -444,20 +444,20 @@ def test_next_day_unresolved_buy_is_physical_account_scoped(db_session, monkeypa
         result = admin_scheduler.run_once(slot='11:30', now=at)
         submitted = bool(harness.broker.buy_calls)
         if shared:
-            assert result['profile_buy']['reason'] == 'duplicate_open_order'
+            assert result['profile_buy']['reason'] == 'order_status_unverified'
     else:
         result = _run_user_scheduler_slot(db_session, user_scheduler, user, slot='11:30', now=at)
         submitted = bool(client.buy_calls)
         if shared:
-            assert result['pipeline_diagnostics']['fallback_candidate_results_by_symbol']['028670']['skip_reason'] == 'duplicate_open_order'
+            assert result['pipeline_diagnostics']['fallback_candidate_results_by_symbol']['028670']['skip_reason'] == 'order_status_unverified'
             run = db_session.query(TradeRunLog).filter_by(
-                owner_user_id=user.id, reason='duplicate_open_order').one()
+                owner_user_id=user.id, reason='order_status_unverified').one()
             risk = json.loads(run.response_payload)['risk']
             assert risk['duplicate_check_source'] == 'local_db'
             assert risk['matched_order_id'] == old_id
             assert risk['matched_order_owner_user_id'] is None
             assert risk['requested_order_owner_user_id'] == user.id
-            assert risk['block_reason'] == 'duplicate_open_order'
+            assert risk['block_reason'] == 'order_status_unverified'
             encoded = json.dumps(risk)
             assert '11112222' not in encoded
             assert 'fake-user-key' not in encoded

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
+import math
+import re
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -218,9 +222,32 @@ def position_management_block_reason(
     ).all():
         if matches(order.owner_user_id, order=order):
             if with_evidence:
+                payload = {}
+                try:
+                    payload = json.loads(order.request_payload or '{}')
+                except (TypeError, ValueError):
+                    pass
+                source = getattr(order, 'trigger_source', None) or (payload.get('trigger_source') if isinstance(payload, dict) else None)
+                source = source if isinstance(source, str) and re.fullmatch(r'[A-Za-z0-9_:-]{1,80}', source) else 'unknown'
+                try:
+                    remaining = order.remaining_qty
+                    if remaining is None and order.qty is not None:
+                        remaining = max(0, float(order.qty) - float(order.filled_qty or 0))
+                    remaining = float(remaining) if remaining is not None else None
+                    remaining = remaining if remaining is not None and math.isfinite(remaining) and remaining >= 0 else None
+                except (TypeError, ValueError):
+                    remaining = None
+                checked = datetime.now(timezone.utc).isoformat()
+                logging.getLogger(__name__).info(
+                    'local_unresolved_sell_order owner_user_id=%s order_id=%s status=%s source=%s remaining_quantity=%s checked_at=%s',
+                    order.owner_user_id, order.id, order.internal_status, source, remaining, checked)
                 return {'reason': 'local_unresolved_sell_order', 'duplicate_check_source': 'local_order_log',
                         'local_order_id': order.id, 'symbol': order.symbol, 'side': 'sell',
-                        'order_status': order.internal_status,
+                        'order_status': order.internal_status, 'order_source': source,
+                        'remaining_quantity': remaining, 'checked_at': checked,
+                        'matched_order_owner_user_id': order.owner_user_id,
+                        'requested_order_owner_user_id': owner_user_id,
+                        'broker_last_synced_at': str(order.last_synced_at) if order.last_synced_at else None,
                         'broker_order_id_masked': '***' + str(order.broker_order_id or '')[-4:]}
             return 'duplicate_open_sell_order'
     return None

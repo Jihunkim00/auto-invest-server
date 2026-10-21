@@ -23,7 +23,6 @@ pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
 
 LEGACY_FLAGS = {
     'dry_run',
-    'kill_switch',
     'runtime_authorized',
     'live_order_possible',
     'kis_real_order_enabled',
@@ -195,6 +194,17 @@ def test_legacy_flags_do_not_change_automation_mode_meaning(
     assert result['live_order_gate']['automation_mode'] == mode
     assert result['broker_buy_call_count'] == expected_broker_calls
     assert len(broker.buy_calls) == expected_broker_calls
+
+
+def test_global_kill_switch_blocks_live_mode_without_changing_authority(db_session):
+    service, runtime, _, _, broker, _, _, _ = _build_service(db_session)
+    _set_mode(db_session, runtime, 'live')
+    runtime.update_settings(db_session, {'kill_switch': True})
+    result = _run(service, db_session)
+    assert result['live_order_gate']['automation_mode'] == 'live'
+    assert result['broker_buy_call_count'] == 0
+    assert result['reason'] == 'global_kill_switch_enabled'
+    assert broker.buy_calls == []
 
 
 def test_live_score_below_65_never_reaches_broker(db_session):

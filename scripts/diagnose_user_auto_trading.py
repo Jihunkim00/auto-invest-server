@@ -133,7 +133,9 @@ def diagnose(db, username, trading_date):
             'final_stage': trace.get('final_stage') or run.get('stage'),
             'exception_type': code(payload.get('exception_type')),
             'duplicate_evidence': {key: management[key] for key in ('duplicate_check_source', 'broker_order_id_masked',
-                'symbol', 'side', 'order_status', 'remaining_quantity', 'account_scope_verified') if key in management},
+                'symbol', 'side', 'order_status', 'remaining_quantity', 'account_scope_verified',
+                'local_order_id', 'order_source', 'checked_at', 'broker_last_synced_at',
+                'matched_order_owner_user_id', 'requested_order_owner_user_id') if key in management},
             'watchlist': f"{raw.get('scored_count', 'UNKNOWN')} / {raw.get('source_count', 'UNKNOWN')}",
             'profile_watchlist': snapshot.get('selected_count', 'NOT REACHED'),
             'a_top5': len(pipeline['runtime_quant_top5_symbols']) if 'runtime_quant_top5_symbols' in pipeline else 'UNKNOWN' if reached else 'NOT REACHED',
@@ -146,6 +148,9 @@ def diagnose(db, username, trading_date):
             'order': ('SIMULATED ' if simulated else 'BROKER ') + str(order.get('side', '')).upper() if order else 'NOT CALLED',
             'order_status': order.get('internal_status'), 'scores': scores,
             'thresholds': thresholds,
+            'gates': trace.get('gates') or [],
+            'gate_counts': trace.get('gate_counts') or {},
+            'first_blocked_gate': trace.get('first_blocked_gate'),
             'stage_durations_ms': trace.get('stage_durations_ms') or pipeline.get('performance') or {},
             'retry': payload.get('account_snapshot_retry') or {key: payload[key] for key in (
                 'attempts', 'max_attempts', 'attempt_history', 'read_operation', 'http_status', 'msg_cd') if key in payload},
@@ -173,6 +178,11 @@ def render(report):
               ('order', 'Order'), ('order_status', 'Order Status'), ('broker_submit_called', 'Broker Submit Called')]
     for slot in report['slots']:
         lines += ['', slot['slot']] + [f"{label}: {slot[key] if slot[key] is not None else 'UNKNOWN'}" for key, label in labels]
+        for gate in slot.get('gates', []):
+            lines.append(f"{gate['sequence']:02d}. {gate['gate_name']} {gate['status']} "
+                f"Actual={json.dumps(gate['actual_value'], ensure_ascii=False)} "
+                f"Required={json.dumps(gate['required_value'], ensure_ascii=False)} "
+                f"Reason={gate['reason_code']}")
         for key in ('duplicate_evidence', 'scores', 'thresholds', 'stage_durations_ms', 'retry'):
             if slot[key]:
                 lines.append(f'{key}: ' + json.dumps(slot[key], ensure_ascii=False))

@@ -512,7 +512,8 @@ class AutomationProfileBuySchedulerService:
                 None,
             )
             reason = calendar_skip or score_gate_skip or (
-                'below_profile_buy_threshold' if top_score is not None and top_score < 65 else 'no_executable_candidate'
+                'below_profile_buy_threshold' if top_score is not None and top_score < 65 else
+                next((item['skip_reason'] for item in candidate_diagnostics if item.get('skip_reason')), 'no_executable_candidate')
             )
             blocked = self._blocked(
                 reason,
@@ -868,8 +869,15 @@ class AutomationProfileBuySchedulerService:
             target['calendar_gap_position_size_multiplier'] = multiplier
             quantity = math.floor(approved / price)
             if quantity < 1:
+                from app.services.automation_run_diagnostics import record_gate
+                record_gate('SIZING', actual={'quantity': quantity, 'approved_notional_krw': approved,
+                    'price': price}, required={'quantity': '>=1'}, reason='quantity_invalid')
                 candidate_diagnostics.append({'symbol': symbol, 'skip_reason': 'quantity_invalid'})
                 continue
+            from app.services.automation_run_diagnostics import record_gate
+            record_gate('SIZING', actual={'quantity': quantity, 'price': price, 'approved_notional_krw': approved,
+                'capital_state': target.get('capital_state'), 'account_trading_limits': target.get('account_trading_limits')},
+                required={'quantity': '>=1', 'cash_only': True})
             candidate_diagnostics.append({'symbol': symbol, 'final_buy_score': score, 'quant_c_score': _score(candidate, 'quant_c_score', 'entry_quant_score'), 'quant_c_threshold': A_TOP5_C_MIN_SCORE if c_score_mode else None, 'quant_c_gate_passed': candidate.get('quant_c_gate_passed') if c_score_mode else None, 'gpt_buy_score': candidate.get('ai_buy_score') if c_score_mode else None, 'gpt_buy_score_threshold': candidate.get('gpt_buy_score_threshold') if c_score_mode else None, 'gpt_buy_score_gate_passed': candidate.get('gpt_buy_score_gate_passed') if c_score_mode else None, 'skip_reason': None, 'selected': True, 'approved_notional_krw': round(approved, 2), 'quantity': quantity})
             return candidate, target, {'quantity': quantity, 'price': price, 'approved_notional_krw': round(approved, 2)}, top_score, candidate_diagnostics
         return None, {}, {}, top_score, candidate_diagnostics

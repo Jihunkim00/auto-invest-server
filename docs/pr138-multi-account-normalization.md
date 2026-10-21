@@ -1,5 +1,9 @@
 # PR138 후속: 멀티계정 KIS 정상화와 가상 매수 검증
 
+추가 필수 요구사항인 계정별 실제 리스크 엔진·게이트 판정·차단 매트릭스의 최신 검증은 [별도 보고서](pr138-account-risk-gate-verification.md)와 [전체 게이트 JSON](pr138-account-risk-gate-verification.json)에 기록한다.
+
+주문 #14의 후속 실제 KIS 체결 대조·승인 대기 복구안·격리 테스트 결과는 [정합성 복구 보고서](pr138-order14-reconciliation.md)에 기록한다. 이후 조사에서 실제 전량 체결 SELL임을 확인했으며, 아래의 최초 원인 미확정과 운영 DB 비변경 기록은 당시 관측으로 보존한다.
+
 기준: `pr138-market-regime-shadow`, `c21ae9c`. 검증일: 2026-10-21 KST.
 이 문서는 합성 시세·GPT Mock·격리된 테스트 DB의 결과와 기존 DB 읽기 전용 관측을 구분한다.
 운영 주문, 취소, DB 갱신, 서버 재시작, 설정 변경은 실행하지 않았다.

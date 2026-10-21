@@ -184,7 +184,12 @@ def test_0930_has_one_canonical_run_and_no_legacy_automatic_runs(
     assert len(harness.broker.buy_calls) == 1
     assert harness.client.external_kis_submit_count == 0
 
-    rows = db_session.query(TradeRunLog).all()
+    all_rows = db_session.query(TradeRunLog).all()
+    audits = [row for row in all_rows if row.mode == 'automation_gate_audit']
+    assert len(audits) == 2
+    assert all(row.order_id is None and row.signal_id is None for row in audits)
+    assert all(json.loads(row.response_payload)['run_diagnostics']['gates'] for row in audits)
+    rows = [row for row in all_rows if row.mode != 'automation_gate_audit']
     sources = {str(row.trigger_source) for row in rows}
     modes = {str(row.mode) for row in rows}
     assert sum(

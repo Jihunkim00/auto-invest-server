@@ -12,6 +12,8 @@ import logging
 import math
 import threading
 import time
+import uuid
+from app.services.automation_run_diagnostics import observe_gate
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -990,7 +992,54 @@ class AutomationSchedulerService(SchedulerService):
             return {"status": "blocked", "reason": "invalid_profile_slot"}
         return self._safe_call(self._run_automation_tick, resolved_slot, current)
 
-    def _run_automation_tick(
+    def _run_automation_tick(self, slot_name, now=None, slot_claimed=False, **kwargs):
+        from app.services.automation_run_diagnostics import capture_run, new_trace, finish_trace, record_gate, set_gate_scope
+        trace = new_trace(owner_user_id=None, scheduler_slot=self._profile_scheduler_slot(slot_name),
+                          now_provider=self.retry_now_provider)
+        with capture_run(trace):
+            original = self._run_automation_tick_observed(slot_name, now, slot_claimed, **kwargs)
+            # Legacy early skips return their canonical audit row. Preserve
+            # that API and enrich the existing row instead of duplicating it.
+            existing_run = original if isinstance(original, TradeRunLog) else None
+            result = original if isinstance(original, dict) else {
+                'result': getattr(original, 'result', 'failed'),
+                'reason': getattr(original, 'reason', 'scheduler_result_invalid'),
+            }
+            if str(result.get('result') or result.get('status')).lower() in {'blocked', 'failed', 'hold', 'skipped'}:
+                result.setdefault('submission_eligible', False)
+                result.setdefault('real_order_submitted', False)
+                result.setdefault('broker_submit_called', False)
+                result.setdefault('validation_called', False)
+            if not any(row['gate_name'] == 'SCHEDULER' for row in trace['gates']):
+                with SessionLocal() as db:
+                    schedule = self.automation_profiles.selected_profile_schedule(db, now=now or self.retry_now_provider())
+                    set_gate_scope(((schedule or {}).get('profile') or {}).get('id'))
+                record_gate('SCHEDULER', actual={'slot': trace['scheduler_slot'], 'result': result.get('result')},
+                            required='active configured current slot', reason=result.get('reason') or 'slot_not_due')
+            finish_trace(trace, result)
+        result['run_diagnostics'] = trace
+        # Dedicated audit also covers early HOLD/BLOCK paths with no analysis run.
+        with SessionLocal() as db:
+            if existing_run is not None:
+                row = db.get(TradeRunLog, existing_run.id)
+                payload = json.loads(row.response_payload or '{}')
+                payload['run_diagnostics'] = trace
+                serialized = json.dumps(payload, ensure_ascii=False, default=str)
+                row.response_payload = serialized
+            else:
+                db.add(TradeRunLog(run_key='gate-audit:' + uuid.uuid4().hex,
+                    trigger_source='automation_gate_audit', symbol='WATCHLIST', mode='automation_gate_audit',
+                    stage='done', result=str(result.get('result') or result.get('status') or 'unknown'),
+                    reason=str(result.get('reason') or ''),
+                    request_payload=json.dumps({'scheduler_slot': trace['scheduler_slot']}),
+                    response_payload=json.dumps({'run_diagnostics': trace}, ensure_ascii=False, default=str)))
+            db.commit()
+        if existing_run is not None:
+            existing_run.response_payload = serialized
+            return existing_run
+        return result
+
+    def _run_automation_tick_observed(
         self, slot_name: str, now: datetime | None = None,
         slot_claimed: bool = False, **kwargs,
     ) -> dict[str, Any]:
@@ -1094,6 +1143,12 @@ class AutomationSchedulerService(SchedulerService):
             profile = (schedule.get('profile') or {})
             profile_key = str(schedule.get('profile_key') or profile.get('profile_key') or '')
             profile_id = _safe_int(profile.get('id'))
+            from app.services.automation_run_diagnostics import record_gate, set_gate_scope
+            set_gate_scope(profile_id)
+            record_gate('SCHEDULER', actual={'slot': slot, 'profile_key': profile_key},
+                        required='active configured current slot')
+            record_gate('ACCOUNT_SCOPE', actual={'owner_user_id': profile.get('owner_user_id'),
+                        'broker_account_id': 'admin:kis:KR'}, required='legacy admin account')
             configured_slots = {
                 self._profile_scheduler_slot(str(value))
                 for value in (schedule.get('analysis_times') or [])
@@ -1335,6 +1390,8 @@ class AutomationSchedulerService(SchedulerService):
                 or (exit_result or {}).get('status') == 'retry_pending'
             )
             if block_entry_for_exit:
+                record_gate('POSITION', actual={'portfolio': portfolio, 'exit_result': exit_result},
+                            required='no critical or unresolved exit', reason=sell_reason)
                 safety = (exit_result or {}).get('safety')
                 safety = safety if isinstance(safety, dict) else {}
                 return {
@@ -1382,6 +1439,10 @@ class AutomationSchedulerService(SchedulerService):
                     },
                 }
 
+            record_gate('POSITION', actual=portfolio, required='no pending or critical exit',
+                        reason=portfolio.get('buy_block_reason') if portfolio.get('buy_blocked') else None)
+            record_gate('MARKET_SESSION', actual=market_session, required={'is_market_open': True},
+                        reason=None if market_session.get('is_market_open') is True else 'market_session_closed')
             if market_session.get('is_market_open') is not True:
                 return {
                     'scheduler': self.__class__.__name__,
@@ -1431,6 +1492,10 @@ class AutomationSchedulerService(SchedulerService):
                 and cutoff[2] == ':'
                 and now_kst.strftime('%H:%M') >= cutoff
             )
+            record_gate('ENTRY_WINDOW', actual={'time': now_kst.strftime('%H:%M'),
+                'entry_allowed': market_session.get('is_entry_allowed_now')},
+                required={'no_new_entry_after': cutoff}, reason='entry_window_closed'
+                if market_session.get('is_entry_allowed_now') is not True or cutoff_reached else None)
             if (
                 market_session.get('is_entry_allowed_now') is not True
                 or cutoff_reached
@@ -1465,6 +1530,20 @@ class AutomationSchedulerService(SchedulerService):
                     },
                 }
 
+            from app.services.automation_entry_safety import global_buy_block_reason, account_buy_block_reason, snapshot_block_reason
+            reason = snapshot_block_reason(account_snapshot, now=self.retry_now_provider())
+            if reason:
+                record_gate('KIS_SNAPSHOT', actual=account_snapshot, required={'max_age_seconds': 10}, reason=reason)
+                return {'result': 'blocked', 'reason': reason, 'broker_submit_called': False}
+            from app.services.kis_snapshot_order_state import broker_order_block
+            order_block = broker_order_block(account_snapshot)
+            if order_block:
+                record_gate('POSITION', actual=order_block, required='verified orders and no active sell',
+                            reason=order_block['reason'])
+                return {'result': 'blocked', **order_block, 'broker_submit_called': False}
+            reason = account_buy_block_reason(db) or global_buy_block_reason(db)
+            if reason:
+                return {'result': 'blocked', 'reason': reason, 'broker_submit_called': False}
             mode = str(authority.get("automation_mode") or "test").strip().lower()
             execution_authority = str(
                 authority.get("execution_authority") or mode.upper()
@@ -2699,6 +2778,7 @@ class AutomationSchedulerService(SchedulerService):
         finally:
             lock.release()
 
+    @observe_gate('KIS_SNAPSHOT', allowed_key='fetch_success')
     def _account_snapshot_preflight(
         self,
         db,
@@ -2744,7 +2824,7 @@ class AutomationSchedulerService(SchedulerService):
                     'balance': dict(balance),
                     'fetch_success': True,
                     'account_state_live_verified': True,
-                    'read_at': datetime.now(UTC).isoformat(),
+                    'read_at': self.retry_now_provider().isoformat(),
                 }
 
             if positions_override is not None:
@@ -2762,7 +2842,7 @@ class AutomationSchedulerService(SchedulerService):
                     'balance': dict(balance),
                     'fetch_success': True,
                     'account_state_live_verified': True,
-                    'read_at': datetime.now(UTC).isoformat(),
+                    'read_at': self.retry_now_provider().isoformat(),
                 }
 
             state = KisAccountStateCacheService.get_or_create(client).get_account_state(

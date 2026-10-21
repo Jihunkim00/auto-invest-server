@@ -106,6 +106,7 @@ class FillingUserClient(FakeKisClient):
 
 
 def setup_user(db, monkeypatch, harness, name, *, score=70, failure=False, historical_sell=False):
+    monkeypatch.setattr('app.services.user_broker_account_service._now', harness.clock.now)
     user = _user(db, name)
     # An unconfigured new user must not be enabled implicitly.
     assert db.query(UserTradingSettings).filter_by(user_id=user.id).count() == 0

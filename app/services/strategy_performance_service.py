@@ -24,6 +24,7 @@ from app.services.strategy_profile_service import StrategyProfileService
 
 PositionLoader = Callable[[Session, str, str], list[dict[str, Any]]]
 _KST = ZoneInfo("Asia/Seoul")
+_ALL_OWNERS = object()
 _FILLED_STATUSES = {"FILLED", "PARTIALLY_FILLED", "PARTIAL_FILLED"}
 _REJECTED_STATUSES = {"REJECTED", "REJECTED_BY_SAFETY_GATE", "FAILED"}
 _REDACTED_KEYS = {
@@ -48,10 +49,12 @@ class StrategyPerformanceService:
         position_loader: PositionLoader | None = None,
         strategy_profiles: StrategyProfileService | None = None,
         fee_rate: float = 0.00015,
+        owner_user_id: Any = _ALL_OWNERS,
     ) -> None:
         self.position_loader = position_loader
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.fee_rate = max(0.0, float(fee_rate))
+        self.owner_user_id = owner_user_id
 
     def daily(
         self,
@@ -222,6 +225,8 @@ class StrategyPerformanceService:
         profile = self._performance_profile(db, profile_key)
         positions, _ = self._load_positions(db, provider, market)
         orders = self._orders(db, provider=provider, market=market)
+        # Provenance tags cannot confer ownership on a foreign account's fill.
+        orders = [row for row in orders if row.owner_user_id == profile.get('owner_user_id')]
         provenance = self._order_provenance(db, orders)
         orders = [
             order
@@ -463,6 +468,8 @@ class StrategyPerformanceService:
         before: datetime | None = None,
     ) -> list[OrderLog]:
         query = db.query(OrderLog).filter(OrderLog.broker == _provider(provider))
+        if self.owner_user_id is not _ALL_OWNERS:
+            query = query.filter(OrderLog.owner_user_id == self.owner_user_id)
         rows = query.order_by(OrderLog.created_at.asc(), OrderLog.id.asc()).all()
         normalized_market = _market(market)
         result = []

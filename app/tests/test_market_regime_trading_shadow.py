@@ -419,10 +419,15 @@ def test_market_regime_admin_skip_logs_same_decision_context_without_execution(d
     events = []
     scheduler = _canonical_scheduler_for_tick(db_session, monkeypatch, positions_loader=lambda db: [], events=events)
     RuntimeSettingService().update_settings(db_session, {"automation_profile_scheduler_enabled": False})
-    scheduler._run_automation_tick("09:30", now)
+    result = scheduler._run_automation_tick("09:30", now)
+    assert isinstance(result, TradeRunLog)
     log = db_session.query(TradeRunLog).one()
     payload = json.loads(log.response_payload)
     assert payload["reason"] == "automation_disabled"
     assert payload["market_regime"]["stage"] == 4
     assert payload["market_regime_shadow_policy"]["applied_to_live_trading"] is False
+    trace = payload['run_diagnostics']
+    assert trace['first_blocked_gate']['reason_code'] == 'automation_disabled'
+    assert all(gate['status'] == 'NOT_REACHED' for gate in trace['gates']
+        if gate['gate_name'] in {'ACCOUNT_RISK', 'BROKER_PREFLIGHT', 'BROKER_BUY'})
     assert events == []

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.db.models import OrderLog
+from app.db.models import OrderLog, User, UserTradingSettings
 from app.services.account_trading_limit_service import AccountTradingLimitError, AccountTradingLimitService, minimum_buy_cap
 from app.services.compound_capital_service import CompoundCapitalService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -36,14 +36,17 @@ class StrategyRiskBudgetService:
         performance_service: StrategyPerformanceService | None = None,
         position_loader: PositionLoader | None = None,
         balance_loader: BalanceLoader | None = None,
+        now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.position_loader = position_loader
         self.balance_loader = balance_loader
+        self.now_provider = now_provider or (lambda: datetime.now(_KST))
         self.performance_service = performance_service or StrategyPerformanceService(
             position_loader=position_loader,
             strategy_profiles=self.strategy_profiles,
+            owner_user_id=None,
         )
 
     def calculate(
@@ -73,11 +76,16 @@ class StrategyRiskBudgetService:
         }
         if profile_name:
             monthly_kwargs["profile_name"] = profile_name
+        daily_kwargs = {}
+        if isinstance(self.performance_service, StrategyPerformanceService):
+            monthly_kwargs['month'] = self.now_provider().astimezone(_KST).strftime('%Y-%m')
+            daily_kwargs['date_value'] = self.now_provider().astimezone(_KST).date()
         monthly = self.performance_service.monthly(db, **monthly_kwargs)
         daily = self.performance_service.daily(
             db,
             provider=normalized_provider,
             market=normalized_market,
+            **daily_kwargs,
         )
         trades = self.performance_service.trades(
             db,
@@ -277,6 +285,28 @@ class StrategyRiskBudgetService:
 
         if bool(settings.get("kill_switch")):
             block("kill_switch_active", "Kill switch가 활성화되어 신규 진입을 차단합니다.")
+        admin = db.query(User).filter(User.role == 'admin').one_or_none() if owner_user_id is None else None
+        account_settings = db.query(UserTradingSettings).filter_by(
+            user_id=admin.id if admin else owner_user_id).first()
+        if account_settings is not None and account_settings.kill_switch:
+            block('user_kill_switch_enabled', 'Account kill switch is enabled.')
+        if normalized_symbol:
+            today = self.now_provider().astimezone(_KST).date()
+            symbol_orders = db.query(OrderLog).filter(
+                OrderLog.owner_user_id == owner_user_id, OrderLog.broker == normalized_provider,
+                OrderLog.market == normalized_market, OrderLog.symbol == normalized_symbol,
+                OrderLog.side == 'buy', OrderLog.internal_status == 'FILLED',
+            ).all()
+            entries = sum(1 for order in symbol_orders
+                if (order.submitted_at or order.created_at) is not None and
+                ((order.submitted_at or order.created_at).replace(tzinfo=UTC)
+                 if (order.submitted_at or order.created_at).tzinfo is None else
+                 (order.submitted_at or order.created_at)).astimezone(_KST).date() == today)
+            allowed_entries = (1 + max(0, int(account_settings.same_direction_reentry_limit or 0))
+                if account_settings is not None else max(1, int(settings.get('per_symbol_daily_entry_limit') or 1)))
+            if entries >= allowed_entries:
+                block('same_direction_reentry_limit_reached',
+                      f'Owner {owner_user_id}, symbol {normalized_symbol}: {entries}/{allowed_entries} entries.')
         if monthly_loss_hit:
             block(
                 "monthly_loss_limit_hit",
@@ -563,7 +593,7 @@ class StrategyRiskBudgetService:
         market: str,
         owner_user_id: int | None = None,
     ) -> int:
-        today = datetime.now(_KST).date()
+        today = self.now_provider().astimezone(_KST).date()
         start = datetime.combine(today, time.min, tzinfo=_KST).astimezone(UTC)
         end = start + timedelta(days=1)
         rows = (

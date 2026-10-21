@@ -689,7 +689,11 @@ def test_no_active_retry_normal_entry_path_is_unchanged(db_session, monkeypatch)
     assert result["result"] == "LIVE_READY"
     assert "recovered_from_position_retry" not in result
     assert sum(event[0] == "entry_analysis" for event in events) == 1
-    assert db_session.query(TradeRunLog).count() == 0
+    runs = db_session.query(TradeRunLog).all()
+    assert len(runs) == 1
+    assert runs[0].mode == 'automation_gate_audit'
+    assert runs[0].order_id is None and runs[0].signal_id is None
+    assert json.loads(runs[0].response_payload)['run_diagnostics']['gates']
     assert deferred == []
 
 

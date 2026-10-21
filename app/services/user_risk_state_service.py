@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, PositionLifecycle, User, UserTradingRiskState, UserTradingSettings
+from app.services.automation_run_diagnostics import observe_gate
 
 
 _KST = ZoneInfo('Asia/Seoul')
@@ -326,6 +327,7 @@ class UserRiskStateService:
                 count += 1
         return count
 
+    @observe_gate('ACCOUNT_RISK', allowed_key='risk_allowed', stage='risk_engine')
     def get_user_risk_state(
         self,
         db: Session,
@@ -334,6 +336,7 @@ class UserRiskStateService:
         provider: str = 'kis',
         market: str = 'KR',
         as_of: datetime | None = None,
+        symbol: str | None = None,
     ) -> dict[str, Any]:
         normalized_provider, normalized_market, currency, _tz = normalize_trading_scope(provider, market)
         trading_date = trading_date_for(normalized_provider, normalized_market, at=as_of)
@@ -358,6 +361,8 @@ class UserRiskStateService:
             and float(daily_loss_pct) <= -max_daily_loss_pct
         )
         risk_flags: list[str] = []
+        if settings['kill_switch'] and str(settings['trading_mode']).lower() == 'live':
+            risk_flags.append('user_kill_switch_enabled')
         if not settings['enabled']:
             risk_flags.append('user_trading_disabled')
         elif str(settings['trading_mode'] or 'paper').strip().lower() == 'live':
@@ -371,6 +376,19 @@ class UserRiskStateService:
             risk_flags.append('daily_loss_limit_reached')
         if open_positions >= max_open_positions:
             risk_flags.append('max_open_positions_reached')
+        same_direction_entries = 0
+        if symbol:
+            rows = _matching_user_orders(db, user, normalized_provider, normalized_market,
+                                         trading_date, _tz)
+            same_direction_entries = sum(1 for order, payloads in rows
+                if str(order.symbol).upper() == symbol.upper() and str(order.side).lower() == 'buy'
+                and str(order.internal_status or '').upper() == InternalOrderStatus.FILLED.value
+                and not _is_simulated(order, payloads))
+            # An ongoing partial fill is blocked by the active-order gate;
+            # it is not a completed entry followed by a new entry.
+            # Zero permits the first entry, and no re-entry after that entry.
+            if same_direction_entries > max(0, int(settings['same_direction_reentry_limit'] or 0)):
+                risk_flags.append('same_direction_reentry_limit_reached')
         return {
             'owner_user_id': int(user.id),
             'provider': normalized_provider,
@@ -392,6 +410,8 @@ class UserRiskStateService:
             'max_open_positions': max_open_positions,
             'max_position_pct': float(settings['max_position_pct'] or 0),
             'same_direction_reentry_limit': int(settings['same_direction_reentry_limit'] or 0),
+            'same_direction_entry_count': same_direction_entries,
+            'symbol': symbol,
             'no_new_entry_after': settings['no_new_entry_after'],
             'position_limit_hit': open_positions >= max_open_positions,
             'risk_allowed': not risk_flags,
