@@ -157,6 +157,12 @@ def test_admin_lifecycle_does_not_preempt_regular_user_analysis(db_session, acco
 def test_user_position_snapshot_cannot_cross_scope(db_session, accounts, field, value):
     _, first, _, _ = accounts
     snapshot = {**_snapshot(first), field: value}
+    if field == 'open_orders':
+        result = _manage_user(db_session, first, snapshot)
+        assert result['entry_blocked'] is True
+        assert result['reason'] == 'open_orders_snapshot_unavailable'
+        assert result['entry_analysis_started'] is False
+        return
     with pytest.raises(ValueError, match='account_scope_mismatch|account_snapshot_unavailable'):
         _manage_user(db_session, first, snapshot)
 
@@ -216,7 +222,8 @@ def test_broker_pending_sell_blocks_entry_without_local_holdings(db_session, acc
     snapshot['open_orders'] = [{'symbol': '028670', 'side': 'sell', 'status': status}]
     result = _manage_user(db_session, first, snapshot)
     assert result['entry_blocked'] is True
-    assert result['reason'] == 'duplicate_open_sell_order'
+    assert result['reason'] == 'order_status_unverified'
+    assert result['entry_analysis_started'] is False
 
 
 @pytest.mark.parametrize('price,reason', [(9700, 'stop_loss_triggered'), (10900, 'take_profit_triggered')])

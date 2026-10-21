@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping
@@ -38,6 +39,10 @@ TOKEN_REFRESH_MARGIN = timedelta(seconds=30)
 
 class UserBrokerAuthenticationError(RuntimeError):
     '''A user broker rejected authentication or the user token.'''
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        self.details = dict(details or {})
+        super().__init__(message)
 
 
 class UserBrokerUnavailableError(RuntimeError):
@@ -157,19 +162,31 @@ class UserKisReadOnlyClient:
         self.timeout_seconds = timeout_seconds
 
     def get_snapshot(self) -> dict[str, Any]:
-        balance_response = self._get(
-            KIS_BALANCE_PATH,
-            tr_id=KIS_BALANCE_TR_IDS[self.environment],
-            params=self._balance_params(),
+        balance_response = self._snapshot_part(
+            'balance', KIS_BALANCE_PATH, KIS_BALANCE_TR_IDS[self.environment],
+            self._balance_params(), _require_kis_balance_shape,
         )
-        _require_kis_balance_shape(balance_response)
-        orders_response = self._get(
-            KIS_OPEN_ORDERS_PATH,
-            tr_id=KIS_OPEN_ORDERS_TR_ID,
-            params=self._open_orders_params(),
+        orders_response = self._snapshot_part(
+            'open_orders', KIS_OPEN_ORDERS_PATH, KIS_OPEN_ORDERS_TR_ID,
+            self._open_orders_params(), _require_kis_open_orders_shape,
         )
-        _require_kis_open_orders_shape(orders_response)
         return _normalize_kis_snapshot(balance_response, orders_response)
+
+    def _snapshot_part(self, operation, path, tr_id, params, validate):
+        started = time.monotonic()
+        try:
+            payload = self._get(path, tr_id=tr_id, params=params)
+            validate(payload)
+            return payload
+        except (UserBrokerUnavailableError, UserBrokerAuthenticationError) as exc:
+            # Only fixed metadata and broker codes; never raw messages/headers.
+            exc.details.update({
+                'read_operation': exc.details.get('read_operation') or operation,
+                'owner_user_id': self.user_id, 'environment': self.environment,
+                'queried_at': _now().isoformat(),
+                'duration_ms': round((time.monotonic() - started) * 1000, 3),
+            })
+            raise
 
     def _get(self, path: str, *, tr_id: str, params: dict[str, str]) -> dict[str, Any]:
         token = self._token()
@@ -184,18 +201,28 @@ class UserKisReadOnlyClient:
             response = self._send_get(path, tr_id=tr_id, params=params, token=token)
             if _kis_auth_failure(response):
                 raise UserBrokerAuthenticationError('user KIS authentication failed')
-        return _require_kis_read_response(response)
+        payload = _require_kis_read_response(response)
+        # A partial account read must never be represented as a complete empty
+        # account. Keep the existing bounded read policy; do not hide later pages.
+        if str(getattr(response, 'headers', {}).get('tr_cont', '')).upper() in {'M', 'F'}:
+            raise UserBrokerUnavailableError('user KIS snapshot requires continuation',
+                details={'error_type': 'incomplete_snapshot'})
+        return payload
 
     def _token(self, *, force_refresh: bool = False) -> str:
-        return self.token_manager.get_token(
-            user_id=self.user_id,
-            environment=self.environment,
-            credential_identity=self.credential_identity,
-            credentials=self.credentials,
-            http_client=self.http_client,
-            timeout_seconds=self.timeout_seconds,
-            force_refresh=force_refresh,
-        )
+        try:
+            return self.token_manager.get_token(
+                user_id=self.user_id,
+                environment=self.environment,
+                credential_identity=self.credential_identity,
+                credentials=self.credentials,
+                http_client=self.http_client,
+                timeout_seconds=self.timeout_seconds,
+                force_refresh=force_refresh,
+            )
+        except (UserBrokerUnavailableError, UserBrokerAuthenticationError) as exc:
+            exc.details['read_operation'] = 'token'
+            raise
 
     def _send_get(
         self,
@@ -496,6 +523,9 @@ class UserBrokerAccountService:
         environment = str(credentials.get('environment') or row.environment or '').strip().lower()
         if environment not in {'paper', 'live'}:
             raise UserBrokerUnavailableError('user broker environment is invalid')
+        if credentials.get('environment') != row.environment:
+            raise UserBrokerUnavailableError('user broker credential scope mismatch',
+                details={'error_type': 'credential_scope_mismatch'})
 
         if normalized_provider == 'kis':
             client = UserKisReadOnlyClient(
@@ -598,14 +628,10 @@ def _issue_kis_token(
             timeout=timeout_seconds,
         )
     except Exception as exc:
-        raise UserBrokerUnavailableError('user KIS token request failed') from exc
+        raise UserBrokerUnavailableError('user KIS token request failed',
+            details={'error_type': type(exc).__name__, 'read_operation': 'token'}) from exc
 
-    if _status_code(response) >= 400:
-        raise UserBrokerAuthenticationError('user KIS authentication failed')
-    try:
-        payload = response.json()
-    except Exception as exc:
-        raise UserBrokerAuthenticationError('user KIS authentication failed') from exc
+    payload = _require_kis_read_response(response)
     if not isinstance(payload, dict) or not payload.get('access_token'):
         raise UserBrokerAuthenticationError('user KIS authentication failed')
 
@@ -657,6 +683,7 @@ def _normalize_kis_snapshot(
             for quantity in (_first_number(row, ('hldg_qty', 'qty')) for row in _as_list(balance_response.get('output1')))
         ),
         'open_orders': orders,
+        'open_orders_reliable': all(item['order_status_verified'] for item in orders),
     }
 
 
@@ -712,7 +739,8 @@ def _normalize_alpaca_order(row: Any) -> dict[str, Any] | None:
 def _require_kis_read_response(response) -> dict[str, Any]:
     status = _status_code(response)
     if status in {401, 403}:
-        raise UserBrokerAuthenticationError('user KIS authentication failed')
+        raise UserBrokerAuthenticationError('user KIS authentication failed',
+            details={'http_status': status, 'error_type': 'authentication_error'})
     if status >= 400:
         raise UserBrokerUnavailableError(
             'user KIS account request failed',
@@ -737,7 +765,7 @@ def _require_kis_read_response(response) -> dict[str, Any]:
             'user KIS account request failed',
             details={
                 'msg_cd': str(payload.get('msg_cd') or ''),
-                'msg1': str(payload.get('msg1') or ''),
+                'error_type': 'kis_read_rejected',
             },
         )
     return payload
@@ -923,20 +951,52 @@ def _now() -> datetime:
 def _normalize_kis_order(row: Any) -> dict[str, Any] | None:
     item = _as_dict(row)
     quantity = _first_number(item, ('ord_qty',))
-    remaining = _first_number(item, ('psbl_qty', 'rmn_qty'))
-    filled = None
-    if quantity is not None and remaining is not None:
-        filled = max(quantity - remaining, 0)
+    # TTTC0084R supplies tot_ccld_qty and psbl_qty, not a status field.
+    # psbl_qty is amend/cancel capacity; q - psbl_qty is NOT filled quantity.
+    filled = _first_number(item, ('tot_ccld_qty', 'filled_quantity'))
+    remaining = _first_number(item, ('rmn_qty', 'remaining_quantity', 'psbl_qty'))
+    cancelable = _first_number(item, ('psbl_qty',))
+    explicit = str(item.get('status') or '').strip().lower()
+    status = 'unknown'
+    values = [value for value in (quantity, filled, remaining, cancelable) if value is not None]
+    valid = all(math.isfinite(value) and value >= 0 for value in values)
+    if quantity is not None and filled is not None and filled > quantity:
+        valid = False
+    if quantity is not None and remaining is not None and remaining > quantity:
+        valid = False
+    if valid:
+        if explicit in {'canceled', 'cancelled', 'rejected', 'expired'}:
+            status = explicit
+        elif str(item.get('cncl_yn') or '').upper() == 'Y':
+            status = 'canceled'
+        elif quantity is not None and filled is not None and filled >= quantity > 0:
+            status = 'filled' if remaining in {None, 0} else 'unknown'
+        elif explicit == 'filled' and remaining in {None, 0} and filled is None:
+            status = 'filled'
+        elif remaining == 0 and ('rmn_qty' in item or 'remaining_quantity' in item):
+            # No executable remainder is established; do not invent a fill or
+            # cancellation when the broker supplies neither.
+            status = 'inactive'
+        elif remaining is not None and remaining > 0 and explicit != 'filled':
+            status = 'partially_filled' if filled is not None and filled > 0 else 'pending'
+    side = _normalize_side(_first_text(item, ('sll_buy_dvsn_cd', 'sll_buy_dvsn_name')))
+    broker_order_id = _first_text(item, ('odno', 'order_id')) or ''
+    symbol = _first_text(item, ('pdno', 'symbol')) or ''
+    verified = (valid and status != 'unknown' and side in {'buy', 'sell'}
+                and bool(broker_order_id) and len(symbol) == 6 and symbol.isdigit())
     return {
-        'broker_order_id': _first_text(item, ('odno', 'order_id')) or '',
-        'symbol': _first_text(item, ('pdno', 'symbol')) or '',
+        'broker_order_id': broker_order_id,
+        'symbol': symbol,
         'name': _first_text(item, ('prdt_name', 'name')),
-        'side': _normalize_side(_first_text(item, ('sll_buy_dvsn_cd', 'sll_buy_dvsn_name'))),
+        'side': side,
         'quantity': quantity,
         'filled_quantity': filled,
         'remaining_quantity': remaining,
         'order_price': _first_number(item, ('ord_unpr', 'order_price')),
-        'status': _first_text(item, ('status',)) or 'pending',
+        'cancelable_quantity': cancelable,
+        'status': status,
+        'order_status_verified': verified,
+        'order_state_source': 'kis_quantities',
         'submitted_at': _first_text(item, ('ord_tmd', 'submitted_at')),
     }
 

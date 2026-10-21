@@ -150,6 +150,7 @@ class FakeBrokerHttp:
                     'prdt_name': 'Samsung',
                     'sll_buy_dvsn_cd': '02',
                     'ord_qty': '4',
+                    'tot_ccld_qty': '1',
                     'psbl_qty': '3',
                     'ord_unpr': '71000',
                     'ord_tmd': '120000',

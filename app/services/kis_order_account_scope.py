@@ -176,7 +176,8 @@ def kis_client_cache_scope(client: Any) -> str | None:
 def position_management_block_reason(
     db: Session, *, owner_user_id: int | None,
     scope: KisOrderAccountScope | None = None, allow_own_open: bool = False,
-) -> str | None:
+    with_evidence: bool = False,
+) -> str | dict[str, Any] | None:
     """Account-wide unresolved exits take priority over new entries."""
     def matches(owner: int | None, *, order: OrderLog | None = None) -> bool:
         nonlocal scope
@@ -194,6 +195,10 @@ def position_management_block_reason(
         if matches(row.owner_user_id):
             if allow_own_open and row.owner_user_id == owner_user_id and row.status == 'open':
                 continue
+            if with_evidence:
+                return {'reason': 'position_exit_in_progress' if row.status == 'closing' else 'position_management_priority',
+                        'duplicate_check_source': 'local_position_lifecycle', 'symbol': row.symbol,
+                        'lifecycle_id': row.id, 'lifecycle_status': row.status}
             return 'position_management_priority'
     for job in db.query(PositionExitRetryJob).filter(
         PositionExitRetryJob.provider == 'kis', PositionExitRetryJob.market == 'KR',
@@ -204,13 +209,19 @@ def position_management_block_reason(
         if user is not None and user.role == 'admin':
             owner = None  # Retry metadata can use the verified admin profile ID.
         if matches(owner):
-            return 'kis_exit_read_retry_pending'
+            return ({'reason': 'kis_exit_read_retry_pending', 'duplicate_check_source': 'local_exit_retry',
+                     'retry_job_id': job.id} if with_evidence else 'kis_exit_read_retry_pending')
     for order in db.query(OrderLog).filter(
         OrderLog.broker == 'kis', OrderLog.side == 'sell',
         OrderLog.internal_status.in_(['REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING',
             'PENDING_SUBMIT', 'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED']),
     ).all():
         if matches(order.owner_user_id, order=order):
+            if with_evidence:
+                return {'reason': 'local_unresolved_sell_order', 'duplicate_check_source': 'local_order_log',
+                        'local_order_id': order.id, 'symbol': order.symbol, 'side': 'sell',
+                        'order_status': order.internal_status,
+                        'broker_order_id_masked': '***' + str(order.broker_order_id or '')[-4:]}
             return 'duplicate_open_sell_order'
     return None
 

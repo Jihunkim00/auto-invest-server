@@ -171,6 +171,7 @@ class KisWatchlistPreviewService:
         profile_snapshot_context: dict[str, Any] | None = None,
         canonical_profile_pipeline: bool = False,
         decision_timestamp: datetime | None = None,
+        account_positions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         db = db if db is not None else self.db
         settings = get_settings()
@@ -217,7 +218,18 @@ class KisWatchlistPreviewService:
             0,
             _safe_int(runtime_settings.get("per_slot_new_entry_limit"), 1),
         )
-        held_positions, position_warnings = self._load_held_positions(settings)
+        if account_positions is not None:
+            held_positions = [_normalize_kis_position({**item,
+                'qty': item.get('quantity', item.get('qty')),
+                'avg_entry_price': item.get('avg_price', item.get('avg_entry_price'))})
+                for item in account_positions if isinstance(item, dict)]
+            held_positions = [item for item in held_positions if item and item['qty'] > 0]
+            position_warnings = []
+        elif (profile_snapshot_context or {}).get('owner_user_id') is not None:
+            # User analysis must never read the administrator's account.
+            held_positions, position_warnings = [], ['user_position_context_not_supplied']
+        else:
+            held_positions, position_warnings = self._load_held_positions(settings)
         managed_positions = held_positions[:max_open_positions]
         held_symbols = [position["symbol"] for position in held_positions]
         managed_symbols = [position["symbol"] for position in managed_positions]
@@ -806,6 +818,7 @@ class KisWatchlistPreviewService:
             "b_shadow_scan_ms": round((b_shadow_scan_finished - a_quant_scan_finished) * 1000.0, 2),
             "c_shadow_scan_ms": round((c_shadow_scan_finished - b_shadow_scan_finished) * 1000.0, 2),
             "gpt_total_ms": round((gpt_finished - gpt_started) * 1000.0, 2),
+            "final_ranking_ms": round((time.perf_counter() - gpt_finished) * 1000.0, 2),
             "price_request_count": snapshot_stats["price_request_count"],
             "daily_bars_request_count": snapshot_stats["daily_bars_request_count"],
             "intraday_request_count": snapshot_stats["intraday_request_count"],

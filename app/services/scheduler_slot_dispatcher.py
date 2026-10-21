@@ -35,7 +35,7 @@ class SchedulerSlotDispatcher:
                 AutomationSchedulerSlot.scheduled_at <= current - timedelta(minutes=1),
             ).values(status='missed', reason='slot_window_elapsed_no_catchup', finished_at=current))
             db.execute(update(AutomationSchedulerSlot).where(
-                AutomationSchedulerSlot.status == 'running',
+                AutomationSchedulerSlot.status.in_(['running', 'retry_pending']),
                 AutomationSchedulerSlot.started_at <= current - timedelta(seconds=300),
             ).values(status='failed', reason='scheduler_task_timeout', finished_at=current))
             db.commit()
@@ -59,8 +59,8 @@ class SchedulerSlotDispatcher:
                         db.rollback()
                         row = db.query(AutomationSchedulerSlot).filter_by(slot_key=key).one()
                 row_id = row.id
-                if row.status == 'running' and row.started_at and current - row.started_at >= timedelta(seconds=300):
-                    self._finish(row_id, 'failed', 'scheduler_task_timeout', now)
+                if row.status in {'running', 'retry_pending'} and row.started_at and current - row.started_at >= timedelta(seconds=300):
+                    self._finish(row_id, 'failed', 'scheduler_task_timeout', now, expected=row.status)
                     continue
                 if row.status != 'pending' or current < nominal:
                     continue
@@ -99,14 +99,15 @@ class SchedulerSlotDispatcher:
         with self.sessions() as db:
             changed = db.execute(update(AutomationSchedulerSlot).where(
                 AutomationSchedulerSlot.id == row_id, AutomationSchedulerSlot.status == expected
-            ).values(status=status, reason=reason, finished_at=utc_naive(now),
+            ).values(status=status, reason=reason,
+                     finished_at=None if status == 'retry_pending' else utc_naive(now),
                      result_json=json.dumps(result, ensure_ascii=False, default=str) if result else None))
             db.commit()
             if changed.rowcount:
                 key = db.get(AutomationSchedulerSlot, row_id).slot_key
                 if status in {'completed', 'HOLD'}:
                     self.last_successful_slot = key
-                else:
+                elif status in {'failed', 'blocked', 'missed'}:
                     self.last_failed_slot = key
                 logger.info('scheduler_slot_finished slot_key=%s status=%s reason=%s', key, status, reason)
 
@@ -141,7 +142,9 @@ class SchedulerSlotDispatcher:
             return 'skipped', 'no_eligible_user_for_slot'
         raw = str(result.get('result') or result.get('action') or result.get('status') or '').lower()
         reason = str(result.get('reason') or result.get('primary_block_reason') or raw)[:240]
-        if raw in {'error', 'failed', 'retry_pending'}:
+        if raw == 'retry_pending':
+            return 'retry_pending', reason
+        if raw in {'error', 'failed'}:
             return 'failed', reason
         if raw in {'blocked', 'rejected'}:
             return 'blocked', reason

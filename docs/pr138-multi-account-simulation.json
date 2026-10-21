@@ -1,0 +1,3521 @@
+{
+  "fixture_based_reconstruction": true,
+  "production_root_cause": "root_cause_unconfirmed",
+  "common_watchlist_scores": [
+    {
+      "symbol": "005930",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000660",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "402340",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "009150",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "005380",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "373220",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "207940",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "105560",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "028260",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000270",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "032830",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "329180",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "034020",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "055550",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "068270",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "012330",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "006400",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "086790",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "066570",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "035420",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "010120",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "034730",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "267260",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "298040",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "042660",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "009540",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000810",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "010130",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "005490",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "316140",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "042700",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "015760",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "096770",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "051910",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "011200",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "017670",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "138040",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000150",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "010140",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "006800",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "018260",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "033780",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "035720",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "003550",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "267250",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "010950",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "064350",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "024110",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "086280",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "278470",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "272210",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "003670",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "011070",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000720",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "030200",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "307950",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "071050",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "323410",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "005940",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "259960",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "005830",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "078930",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "003490",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "028050",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "047050",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "003230",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "443060",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "006260",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "161390",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "090430",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "016360",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "009830",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "180640",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "039490",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "064400",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "352820",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "047040",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "007660",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "326030",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "021240",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "267270",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "032640",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "241560",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000100",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "377300",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "001440",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "062040",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "353200",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000880",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "175330",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "271560",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "010060",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "128940",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "454910",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "029780",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000500",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "034220",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "036570",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "051900",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "138930",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "001040",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000990",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "066970",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "082740",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "018880",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "052690",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "004020",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "088350",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "004170",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "111770",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "103590",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "022100",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "002380",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "161890",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "001450",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "251270",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "036460",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "009420",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "011780",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "031210",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "011790",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "006360",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "028670",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "008930",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "483650",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "302440",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "375500",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "097950",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "035250",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "192820",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "023530",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "450080",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "004800",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "489790",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "005850",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "139130",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "012750",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "204320",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "017800",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "003690",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "026960",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "383220",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "007340",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "336260",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "282330",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000240",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "011170",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "014680",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "073240",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "085620",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "196170",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "086520",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "247540",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "277810",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "036930",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "240810",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "028300",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "058470",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "298380",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "039030",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "087010",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "000250",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "214450",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "141080",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "222800",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "319660",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "108490",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "403870",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "095340",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "310210",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "440110",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "214370",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "084370",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "080220",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "131290",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "145020",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "347850",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "319400",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "257720",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "095610",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "214150",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "357780",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "064760",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "058610",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "226950",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "178320",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "031980",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "237690",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "067310",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "005290",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "950160",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "098460",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "140410",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "010170",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "032820",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "068760",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "140860",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "263750",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "089030",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    },
+    {
+      "symbol": "083650",
+      "A_buy": 44.0,
+      "A_sell": 16.0
+    }
+  ],
+  "accounts": [
+    {
+      "account": "admin",
+      "simulation_only": true,
+      "real_order_submitted": false,
+      "actual_kis_submit_count": 0,
+      "broker_submit_called": false,
+      "mock_submit_count": 1,
+      "simulated_order_status": "FILLED",
+      "watchlist": 200,
+      "profile": 50,
+      "a_top5": 5,
+      "c65_passed": 5,
+      "gpt_mock_completed": 5,
+      "selected_symbol": "000100",
+      "A": 44.0,
+      "C": 74.24,
+      "GPT": 70.0,
+      "Final": 73.18,
+      "risk": "APPROVED",
+      "stage_durations_ms": {
+        "account_snapshot": 0.025,
+        "profile_watchlist": 48.637,
+        "risk_engine": 40.341,
+        "position_management": 5.461,
+        "total": 2959.163,
+        "a_quant": 472.76,
+        "c_quant": 150.33,
+        "gpt": 117.34,
+        "final_ranking": 162.47
+      },
+      "stages": {
+        "account_snapshot": "COMPLETED",
+        "position_management": "ENTRY_SCAN",
+        "profile_watchlist": "COMPLETED",
+        "a_quant": "COMPLETED",
+        "c_quant": "COMPLETED",
+        "gpt": "COMPLETED",
+        "final_ranking": "COMPLETED",
+        "risk_engine": "APPROVED"
+      },
+      "result": "completed",
+      "reason": null,
+      "blocked_stage": null,
+      "thresholds": {
+        "c_min": 65,
+        "gpt_min": 60,
+        "final_min": 65
+      },
+      "lineage": {
+        "profile_snapshot_selected_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270",
+          "000500",
+          "000660",
+          "000720",
+          "000810",
+          "000880",
+          "000990",
+          "001040",
+          "001440",
+          "001450",
+          "002380",
+          "003230",
+          "003490",
+          "003550",
+          "003670",
+          "003690",
+          "004020",
+          "004170",
+          "004800",
+          "005290",
+          "005380",
+          "005490",
+          "005830",
+          "005850",
+          "005930",
+          "005940",
+          "006260",
+          "006360",
+          "006400",
+          "006800",
+          "007340",
+          "007660",
+          "008930",
+          "009150",
+          "009420",
+          "009540",
+          "009830",
+          "010060",
+          "010120",
+          "010130",
+          "010140",
+          "010170",
+          "010950",
+          "011070",
+          "011170",
+          "011200"
+        ],
+        "runtime_input_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270",
+          "000500",
+          "000660",
+          "000720",
+          "000810",
+          "000880",
+          "000990",
+          "001040",
+          "001440",
+          "001450",
+          "002380",
+          "003230",
+          "003490",
+          "003550",
+          "003670",
+          "003690",
+          "004020",
+          "004170",
+          "004800",
+          "005290",
+          "005380",
+          "005490",
+          "005830",
+          "005850",
+          "005930",
+          "005940",
+          "006260",
+          "006360",
+          "006400",
+          "006800",
+          "007340",
+          "007660",
+          "008930",
+          "009150",
+          "009420",
+          "009540",
+          "009830",
+          "010060",
+          "010120",
+          "010130",
+          "010140",
+          "010170",
+          "010950",
+          "011070",
+          "011170",
+          "011200"
+        ],
+        "runtime_quant_top5_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "gpt_target_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "gpt_completed_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "final_candidate_symbols": null,
+        "selected_final_symbol": null
+      },
+      "candidates": [
+        {
+          "symbol": "000100",
+          "A": 44.0,
+          "C": 74.24,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 73.18,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": true,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000150",
+          "A": 44.0,
+          "C": 74.24,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 73.18,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000240",
+          "A": 44.0,
+          "C": 74.24,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 73.18,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000250",
+          "A": 44.0,
+          "C": 74.24,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 73.18,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000270",
+          "A": 44.0,
+          "C": 74.24,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 73.18,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000500",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000660",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000720",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000810",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000880",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000990",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001040",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001440",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001450",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "002380",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003230",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003490",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003550",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003670",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003690",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004020",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004800",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005290",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005380",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005490",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005830",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005850",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005930",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005940",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006260",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006360",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006400",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006800",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "007340",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "007660",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "008930",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009150",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009420",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009540",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009830",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010060",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010120",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010130",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010140",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010950",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011070",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011200",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        }
+      ],
+      "note": "Mock transport counts; production execution flags describe its injected live client."
+    },
+    {
+      "account": "test01",
+      "simulation_only": true,
+      "real_order_submitted": false,
+      "actual_kis_submit_count": 0,
+      "broker_submit_called": false,
+      "mock_submit_count": 1,
+      "simulated_order_status": "FILLED",
+      "watchlist": 200,
+      "profile": 50,
+      "a_top5": 5,
+      "c65_passed": 5,
+      "gpt_mock_completed": 5,
+      "selected_symbol": "000100",
+      "A": 44.0,
+      "C": 81.67,
+      "GPT": 70.0,
+      "Final": 78.75,
+      "risk": "APPROVED",
+      "stage_durations_ms": {
+        "live_gate": 1.015,
+        "market_session": 392.409,
+        "account_snapshot": 10.194,
+        "position_management": 41.005,
+        "profile_watchlist": 349.4,
+        "a_quant": 1007.78,
+        "c_quant": 164.86,
+        "gpt": 812.73,
+        "final_ranking": 335.66,
+        "canonical_analysis": 3578.392,
+        "risk_engine": 17.012,
+        "execution": 609.306,
+        "result_persistence": 182.895,
+        "total": 4882.382
+      },
+      "stages": {
+        "live_gate": "COMPLETED",
+        "market_session": "COMPLETED",
+        "account_snapshot": "COMPLETED",
+        "position_management": "COMPLETED",
+        "profile_watchlist": "COMPLETED",
+        "a_quant": "COMPLETED",
+        "c_quant": "COMPLETED",
+        "gpt": "COMPLETED",
+        "final_ranking": "COMPLETED",
+        "canonical_analysis": "COMPLETED",
+        "risk_engine": "COMPLETED",
+        "execution": "COMPLETED",
+        "result_persistence": "COMPLETED"
+      },
+      "result": "submitted",
+      "reason": "kis_live_order_submitted",
+      "blocked_stage": null,
+      "thresholds": {
+        "c_min": 65,
+        "gpt_min": 60,
+        "final_min": 65
+      },
+      "lineage": {
+        "profile_snapshot_selected_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270",
+          "000500",
+          "000660",
+          "000720",
+          "000810",
+          "000880",
+          "000990",
+          "001040",
+          "001440",
+          "001450",
+          "002380",
+          "003230",
+          "003490",
+          "003550",
+          "003670",
+          "003690",
+          "004020",
+          "004170",
+          "004800",
+          "005290",
+          "005380",
+          "005490",
+          "005830",
+          "005850",
+          "005930",
+          "005940",
+          "006260",
+          "006360",
+          "006400",
+          "006800",
+          "007340",
+          "007660",
+          "008930",
+          "009150",
+          "009420",
+          "009540",
+          "009830",
+          "010060",
+          "010120",
+          "010130",
+          "010140",
+          "010170",
+          "010950",
+          "011070",
+          "011170",
+          "011200"
+        ],
+        "runtime_input_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270",
+          "000500",
+          "000660",
+          "000720",
+          "000810",
+          "000880",
+          "000990",
+          "001040",
+          "001440",
+          "001450",
+          "002380",
+          "003230",
+          "003490",
+          "003550",
+          "003670",
+          "003690",
+          "004020",
+          "004170",
+          "004800",
+          "005290",
+          "005380",
+          "005490",
+          "005830",
+          "005850",
+          "005930",
+          "005940",
+          "006260",
+          "006360",
+          "006400",
+          "006800",
+          "007340",
+          "007660",
+          "008930",
+          "009150",
+          "009420",
+          "009540",
+          "009830",
+          "010060",
+          "010120",
+          "010130",
+          "010140",
+          "010170",
+          "010950",
+          "011070",
+          "011170",
+          "011200"
+        ],
+        "runtime_quant_top5_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "gpt_target_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "gpt_completed_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "final_candidate_symbols": null,
+        "selected_final_symbol": null
+      },
+      "candidates": [
+        {
+          "symbol": "000100",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": true,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000150",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000240",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000250",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000270",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000500",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000660",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000720",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000810",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000880",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000990",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001040",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001440",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001450",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "002380",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003230",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003490",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003550",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003670",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003690",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004020",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004800",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005290",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005380",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005490",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005830",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005850",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005930",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005940",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006260",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006360",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006400",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006800",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "007340",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "007660",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "008930",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009150",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009420",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009540",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009830",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010060",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010120",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010130",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010140",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010950",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011070",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011200",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        }
+      ],
+      "note": "Mock transport counts; production execution flags describe its injected live client."
+    },
+    {
+      "account": "test02",
+      "simulation_only": true,
+      "real_order_submitted": false,
+      "actual_kis_submit_count": 0,
+      "broker_submit_called": false,
+      "mock_submit_count": 1,
+      "simulated_order_status": "FILLED",
+      "watchlist": 200,
+      "profile": 50,
+      "a_top5": 5,
+      "c65_passed": 5,
+      "gpt_mock_completed": 5,
+      "selected_symbol": "000100",
+      "A": 44.0,
+      "C": 81.67,
+      "GPT": 70.0,
+      "Final": 78.75,
+      "risk": "APPROVED",
+      "stage_durations_ms": {
+        "live_gate": 8.893,
+        "market_session": 412.095,
+        "account_snapshot": 1.27,
+        "position_management": 31.34,
+        "profile_watchlist": 383.383,
+        "a_quant": 1390.05,
+        "c_quant": 169.5,
+        "gpt": 233.78,
+        "final_ranking": 296.57,
+        "canonical_analysis": 3766.363,
+        "risk_engine": 5.795,
+        "execution": 634.361,
+        "result_persistence": 158.029,
+        "total": 5096.676
+      },
+      "stages": {
+        "live_gate": "COMPLETED",
+        "market_session": "COMPLETED",
+        "account_snapshot": "COMPLETED",
+        "position_management": "COMPLETED",
+        "profile_watchlist": "COMPLETED",
+        "a_quant": "COMPLETED",
+        "c_quant": "COMPLETED",
+        "gpt": "COMPLETED",
+        "final_ranking": "COMPLETED",
+        "canonical_analysis": "COMPLETED",
+        "risk_engine": "COMPLETED",
+        "execution": "COMPLETED",
+        "result_persistence": "COMPLETED"
+      },
+      "result": "submitted",
+      "reason": "kis_live_order_submitted",
+      "blocked_stage": null,
+      "thresholds": {
+        "c_min": 65,
+        "gpt_min": 60,
+        "final_min": 65
+      },
+      "lineage": {
+        "profile_snapshot_selected_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270",
+          "000500",
+          "000660",
+          "000720",
+          "000810",
+          "000880",
+          "000990",
+          "001040",
+          "001440",
+          "001450",
+          "002380",
+          "003230",
+          "003490",
+          "003550",
+          "003670",
+          "003690",
+          "004020",
+          "004170",
+          "004800",
+          "005290",
+          "005380",
+          "005490",
+          "005830",
+          "005850",
+          "005930",
+          "005940",
+          "006260",
+          "006360",
+          "006400",
+          "006800",
+          "007340",
+          "007660",
+          "008930",
+          "009150",
+          "009420",
+          "009540",
+          "009830",
+          "010060",
+          "010120",
+          "010130",
+          "010140",
+          "010170",
+          "010950",
+          "011070",
+          "011170",
+          "011200"
+        ],
+        "runtime_input_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270",
+          "000500",
+          "000660",
+          "000720",
+          "000810",
+          "000880",
+          "000990",
+          "001040",
+          "001440",
+          "001450",
+          "002380",
+          "003230",
+          "003490",
+          "003550",
+          "003670",
+          "003690",
+          "004020",
+          "004170",
+          "004800",
+          "005290",
+          "005380",
+          "005490",
+          "005830",
+          "005850",
+          "005930",
+          "005940",
+          "006260",
+          "006360",
+          "006400",
+          "006800",
+          "007340",
+          "007660",
+          "008930",
+          "009150",
+          "009420",
+          "009540",
+          "009830",
+          "010060",
+          "010120",
+          "010130",
+          "010140",
+          "010170",
+          "010950",
+          "011070",
+          "011170",
+          "011200"
+        ],
+        "runtime_quant_top5_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "gpt_target_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "gpt_completed_symbols": [
+          "000100",
+          "000150",
+          "000240",
+          "000250",
+          "000270"
+        ],
+        "final_candidate_symbols": null,
+        "selected_final_symbol": null
+      },
+      "candidates": [
+        {
+          "symbol": "000100",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": true,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000150",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000240",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000250",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000270",
+          "A": 44.0,
+          "C": 81.67,
+          "C_status": "analyzed",
+          "GPT": 70.0,
+          "gpt_status": "completed",
+          "Final": 78.75,
+          "final_calculated": true,
+          "selected_by_a_top5": true,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000500",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000660",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000720",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000810",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000880",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "000990",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001040",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001440",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "001450",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "002380",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003230",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003490",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003550",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003670",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "003690",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004020",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "004800",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005290",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005380",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005490",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005830",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005850",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005930",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "005940",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006260",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006360",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006400",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "006800",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "007340",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "007660",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "008930",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009150",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009420",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009540",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "009830",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010060",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010120",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010130",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010140",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "010950",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011070",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011170",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        },
+        {
+          "symbol": "011200",
+          "A": 44.0,
+          "C": null,
+          "C_status": "not_run",
+          "GPT": null,
+          "gpt_status": "not_run",
+          "Final": null,
+          "final_calculated": false,
+          "selected_by_a_top5": false,
+          "final_selected": false,
+          "block_reason": "kr_trading_disabled"
+        }
+      ],
+      "note": "Mock transport counts; production execution flags describe its injected live client."
+    }
+  ]
+}

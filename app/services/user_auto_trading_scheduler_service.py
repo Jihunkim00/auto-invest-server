@@ -21,6 +21,7 @@ from app.core.constants import A_TOP5_C_MIN_SCORE, A_TOP5_GPT_MIN_BUY_SCORE, BUY
 from app.db.database import SessionLocal
 from app.db.models import (
     AutomationProfileAiCandidateResult,
+    AutomationSchedulerSlot,
     SignalLog,
     TradeRunLog,
     User,
@@ -44,6 +45,13 @@ from app.services.kis_a_top5_score_gate import (
 from app.services.profile_universe_service import profile_universe_bounds
 from app.services.user_trading_execution_service import UserTradingExecutionService
 from app.services.kis_order_account_scope import position_management_block_reason
+from app.services.kis_snapshot_order_state import (
+    ACTIVE_ORDER_STATUSES as _ACTIVE_ORDER_STATUSES,
+    broker_order_block as _broker_order_block,
+)
+from app.services.automation_run_diagnostics import (
+    capture_run, measure_stage, record_snapshot, record_position_management, record_preview,
+)
 from app.services.account_snapshot_retry import (
     MAX_ATTEMPTS as ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
     RETRY_DELAY_SECONDS as ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
@@ -66,12 +74,6 @@ _SCOPE = {
     'kis': ('KR', ZoneInfo('Asia/Seoul')),
     'alpaca': ('US', ZoneInfo('America/New_York')),
 }
-_ACTIVE_ORDER_STATUSES = {
-    'REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING', 'PARTIALLY_FILLED',
-    'UNKNOWN_STALE', 'SYNC_FAILED', 'PENDING_SUBMIT',
-}
-
-
 class _UserSchedulerProcessingError(RuntimeError):
     def __init__(self, stage: str, cause: Exception) -> None:
         self.failure_stage = str(stage or 'canonical_analysis')
@@ -82,7 +84,8 @@ class _UserSchedulerProcessingError(RuntimeError):
 @contextmanager
 def _scheduler_stage(stage: str):
     try:
-        yield
+        with measure_stage(stage):
+            yield
     except _UserSchedulerProcessingError:
         raise
     except Exception as exc:
@@ -112,6 +115,7 @@ class UserAutoTradingCandidateService:
         profile: dict[str, Any] | None = None,
         scheduler_slot: str = 'manual',
         now: datetime | None = None,
+        account_snapshot: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         self.last_pipeline_diagnostics = None
         self.last_pipeline_candidate = None
@@ -120,13 +124,14 @@ class UserAutoTradingCandidateService:
             return []
         check_scheduler_watchlist_ready(db, now or datetime.now(UTC))
         try:
-            snapshot = self.profile_watchlists.build(
-                db,
-                profile=profile,
-                owner_user_id=int(user.id),
-                scheduler_slot=scheduler_slot,
-                now=now,
-            )
+            with measure_stage('profile_watchlist'):
+                snapshot = self.profile_watchlists.build(
+                    db,
+                    profile=profile,
+                    owner_user_id=int(user.id),
+                    scheduler_slot=scheduler_slot,
+                    now=now,
+                )
         except _UserSchedulerProcessingError:
             raise
         except Exception as exc:
@@ -161,6 +166,7 @@ class UserAutoTradingCandidateService:
                     profile_snapshot_context=snapshot_data,
                     canonical_profile_pipeline=True,
                     decision_timestamp=now,
+                    account_positions=(account_snapshot or {}).get('positions', []),
                 )
             except _UserSchedulerProcessingError:
                 raise
@@ -170,6 +176,7 @@ class UserAutoTradingCandidateService:
                     exc,
                 ) from exc
             preview = preview if isinstance(preview, dict) else {}
+            record_preview(preview)
             lineage = _canonical_pipeline_lineage(
                 preview,
                 snapshot_items=snapshot.get("items") or [],
@@ -181,6 +188,7 @@ class UserAutoTradingCandidateService:
             self.last_pipeline_diagnostics = {
                 **{name: preview.get(name) for name in (
                     "market_regime", "market_regime_shadow_policy", "market_regime_shadow_candidates",
+                    "performance", "gpt_attempted_count", "gpt_completed_count", "c_entry_gate_passed_count",
                 )},
                 "canonical_profile_pipeline": True,
                 "profile_id": profile.get("id"),
@@ -450,16 +458,19 @@ class UserPositionManagementService:
         position = positions[0]
         symbol = str(position.get('symbol') or '').strip().upper()
         open_orders = snapshot.get('open_orders') or []
-        if any(
-            isinstance(item, dict)
-            and str(item.get('symbol') or '').strip().upper() == symbol
-            and str(item.get('side') or '').strip().lower() == 'sell'
-            and str(item.get('status') or '').strip().upper() in _ACTIVE_ORDER_STATUSES
-            for item in open_orders
-        ):
+        if provider == 'kis':
+            block = _broker_order_block({'open_orders': open_orders})
+        else:
+            block = {'reason': 'duplicate_open_sell_order'} if any(
+                isinstance(item, dict)
+                and str(item.get('symbol') or '').strip().upper() == symbol
+                and str(item.get('side') or '').strip().lower() == 'sell'
+                and str(item.get('status') or '').strip().upper() in _ACTIVE_ORDER_STATUSES
+                for item in open_orders) else None
+        if block:
             return {
                 'action': 'hold',
-                'reason': 'duplicate_open_sell_order',
+                **block,
                 'symbol': symbol,
                 'positions': positions,
             }
@@ -822,6 +833,7 @@ class UserAutoTradingSchedulerService:
         row.reason = 'account_snapshot_retry_pending_1_of_3'
         db.commit()
 
+        history = [self._snapshot_attempt_event(first_error, attempt=1)]
         state = {'attempt': 2}
 
         def retry_callback() -> int | None:
@@ -842,6 +854,7 @@ class UserAutoTradingSchedulerService:
                     expected_profile_key=profile_key,
                     expected_profile_id=profile_id,
                     attempt=attempt,
+                    attempt_history=history,
                 )
             except Exception as exc:
                 self._finalize_account_snapshot_retry_worker_failure(
@@ -891,7 +904,19 @@ class UserAutoTradingSchedulerService:
             'failure_stage': 'account_snapshot',
             'real_order_submitted': False,
             'broker_submit_called': False,
+            'account_snapshot_retry': {'attempt_history': history},
         }
+
+    def _snapshot_attempt_event(self, error, *, attempt, result=None):
+        event = account_snapshot_failure_diagnostics(
+            error, attempt=attempt, retryable=retryable_kis_account_snapshot_error(error),
+        ) if error is not None else {'attempts': attempt, 'status': 'SUCCESS'}
+        event.setdefault('queried_at', self.now_provider().isoformat())
+        trace = getattr(error, 'run_diagnostics', {}) if error else (result or {}).get('run_diagnostics', {})
+        event.setdefault('duration_ms', (trace.get('stage_durations_ms') or {}).get('account_snapshot'))
+        event['status'] = 'FAILED' if error else 'SUCCESS'
+        logger.info('kis_account_snapshot_attempt %s', json.dumps(event, ensure_ascii=False))
+        return event
 
     def _run_account_snapshot_retry_attempt(
         self,
@@ -905,6 +930,7 @@ class UserAutoTradingSchedulerService:
         expected_profile_key: str,
         expected_profile_id: int | None,
         attempt: int,
+        attempt_history: list[dict[str, Any]] | None = None,
     ) -> str | None:
         try:
             return self._run_account_snapshot_retry_attempt_inner(
@@ -917,6 +943,7 @@ class UserAutoTradingSchedulerService:
                 expected_profile_key=expected_profile_key,
                 expected_profile_id=expected_profile_id,
                 attempt=attempt,
+                attempt_history=attempt_history,
             )
         except Exception as exc:
             self._finalize_account_snapshot_retry_worker_failure(
@@ -947,10 +974,8 @@ class UserAutoTradingSchedulerService:
             db = SessionLocal()
             claim = db.get(UserAutoTradingSlotClaim, int(claim_id))
             if claim is not None and claim.status == 'retry_pending':
-                claim.status = 'failed'
-                claim.result = 'failed'
-                claim.reason = 'account_snapshot_retry_worker_failed'
-                db.commit()
+                UserAutoTradingSchedulerService._finish_claim(db, claim, {'result': 'failed',
+                    'reason': 'account_snapshot_retry_worker_failed', 'owner_user_id': user_id})
         except Exception as finalization_error:
             if db is not None:
                 try:
@@ -995,7 +1020,9 @@ class UserAutoTradingSchedulerService:
         expected_profile_key: str,
         expected_profile_id: int | None,
         attempt: int,
+        attempt_history: list[dict[str, Any]] | None = None,
     ) -> str | None:
+        history = attempt_history if attempt_history is not None else []
         db = SessionLocal()
         try:
             claim = db.get(UserAutoTradingSlotClaim, int(claim_id))
@@ -1079,6 +1106,7 @@ class UserAutoTradingSchedulerService:
                 )
             except Exception as exc:
                 db.rollback()
+                history.append(self._snapshot_attempt_event(exc, attempt=attempt))
                 failure_stage = _failure_details(exc)['failure_stage']
                 retryable = (
                     failure_stage == 'account_snapshot'
@@ -1118,6 +1146,8 @@ class UserAutoTradingSchedulerService:
                     if failure_stage == 'account_snapshot'
                     else None
                 )
+                if retry_diagnostics is not None:
+                    retry_diagnostics['attempt_history'] = history
                 item = self._safe_failure(
                     db,
                     user=user,
@@ -1158,11 +1188,13 @@ class UserAutoTradingSchedulerService:
                 )
                 return None
 
+            history.append(self._snapshot_attempt_event(None, attempt=attempt, result=item))
             retry_diagnostics = {
                 'retry_policy': 'kis_account_snapshot',
                 'attempts': attempt,
                 'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
                 'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                'attempt_history': history,
             }
             item['account_snapshot_retry'] = retry_diagnostics
             run_id = item.get('run_id')
@@ -1187,6 +1219,52 @@ class UserAutoTradingSchedulerService:
 
     @market_regime_run
     def _process_user(
+        self, db: Session, **kwargs: Any,
+    ) -> dict[str, Any]:
+        trace = {'stages': {}, 'stage_durations_ms': {},
+                 'started_at': self.now_provider().isoformat(),
+                 'thresholds': {'c_min': A_TOP5_C_MIN_SCORE, 'gpt_min': A_TOP5_GPT_MIN_BUY_SCORE,
+                                'final_min': BUY_FINAL_MIN}}
+        started = time.perf_counter()
+        with capture_run(trace):
+            try:
+                result = self._process_user_inner(db, **kwargs)
+            except Exception as exc:
+                trace['stage_durations_ms']['total'] = round((time.perf_counter() - started) * 1000, 3)
+                exc.run_diagnostics = trace
+                raise
+        trace['stage_durations_ms']['total'] = round((time.perf_counter() - started) * 1000, 3)
+        context = result.get('profile_context') or {}
+        calendar = result.get('calendar_gap_risk') or context.get('calendar_gap_risk') or {}
+        trace['thresholds']['c_min'] = max(
+            A_TOP5_C_MIN_SCORE, finite_score(calendar.get('required_c_score')) or A_TOP5_C_MIN_SCORE)
+        trace['thresholds']['final_min'] = max(
+            BUY_FINAL_MIN, finite_score(context.get('min_final_score')) or BUY_FINAL_MIN,
+            finite_score(calendar.get('required_final_score')) or BUY_FINAL_MIN)
+        if result.get('position_management') is None and trace.get('position_management'):
+            result['position_management'] = trace['position_management']
+        if str(result.get('result')).lower() in {'hold', 'blocked', 'failed', 'skipped'}:
+            reason = str(result.get('reason') or '').lower()
+            blocked_stage = (result.get('position_management') or {}).get('blocked_stage')
+            if not blocked_stage:
+                for marker, stage in (('c_quant', 'c_quant'), ('c_score', 'c_quant'),
+                        ('gpt', 'gpt'), ('final', 'final_ranking'), ('risk', 'risk_engine'),
+                        ('daily', 'risk_engine'), ('market_closed', 'market_session'),
+                        ('entry_window', 'entry_window')):
+                    if marker in reason:
+                        blocked_stage = stage
+                        break
+            trace['first_blocked_stage'] = trace.get('first_failure_stage') or blocked_stage or trace.get('final_stage')
+        result['run_diagnostics'] = trace
+        run = db.get(TradeRunLog, result['run_id']) if result.get('run_id') else None
+        if run is not None:
+            payload = _json_object(run.response_payload)
+            payload.update(run_diagnostics=trace, position_management=result.get('position_management'))
+            run.response_payload = json.dumps(payload, ensure_ascii=False, default=str)
+            db.commit()
+        return result
+
+    def _process_user_inner(
         self,
         db: Session,
         *,
@@ -1255,6 +1333,7 @@ class UserAutoTradingSchedulerService:
         position_started = time.monotonic()
         with _scheduler_stage('account_snapshot'):
             snapshot = self.account_service.get_broker_snapshot(db, user, provider)
+            record_snapshot(snapshot)
         snapshot_duration_ms = max(0.0, (time.monotonic() - position_started) * 1000)
         with _scheduler_stage('position_management'):
             position_result = self._manage_positions(
@@ -1279,6 +1358,7 @@ class UserAutoTradingSchedulerService:
             'entry_blocked_by_position_management': position_blocked,
             'position_block_reason': position_result.get('reason') if position_blocked else None,
         })
+        record_position_management(position_result)
         action = str(position_result.get('action') or '').strip().lower()
         if action == 'sell':
             exit_method = getattr(self.execution_service, 'run_exit_once', None)
@@ -1383,6 +1463,7 @@ class UserAutoTradingSchedulerService:
                 profile=profile,
                 scheduler_slot=scheduler_slot,
                 now=now,
+                account_snapshot=snapshot,
             )
         pipeline_diagnostics = getattr(
             self.candidate_service,
@@ -2067,6 +2148,7 @@ class UserAutoTradingSchedulerService:
         profile: dict[str, Any],
         scheduler_slot: str,
         now: datetime,
+        account_snapshot: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         selector = self.candidate_service
         if callable(selector):
@@ -2082,6 +2164,7 @@ class UserAutoTradingSchedulerService:
             value = method(
                 db, user=user, provider=provider, profile=profile,
                 scheduler_slot=scheduler_slot, now=now,
+                **({'account_snapshot': account_snapshot} if isinstance(selector, UserAutoTradingCandidateService) else {}),
             )
             return [item for item in (value or []) if isinstance(item, dict)]
         candidate = selector.select_candidate(
@@ -2236,30 +2319,35 @@ class UserAutoTradingSchedulerService:
             if credential is not None and snapshot['environment'] != credential.environment:
                 raise ValueError('account_scope_mismatch')
             positions = snapshot.get('positions')
-            open_orders = snapshot.get('open_orders')
             if (snapshot.get('positions_reliable') is not True or not isinstance(positions, list)
-                    or any(not isinstance(item, dict) for item in positions)
-                    or not isinstance(open_orders, list)
-                    or any(not isinstance(item, dict) for item in open_orders)):
+                    or any(not isinstance(item, dict) for item in positions)):
                 raise ValueError('account_snapshot_unavailable')
-            broker_sell_pending = any(
-                str(item.get('side') or '').lower() == 'sell'
-                and str(item.get('status') or '').upper() not in {'FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'}
-                for item in open_orders)
-            reason = 'duplicate_open_sell_order' if broker_sell_pending else position_management_block_reason(
+            block = _broker_order_block(snapshot) or position_management_block_reason(
                 # Existing user risk gates still count owned open lifecycles
                 # before possible-order reads or submission. Closing records
                 # and unresolved exits must stop entry analysis immediately.
-                db, owner_user_id=user.id, allow_own_open=True,
+                db, owner_user_id=user.id, allow_own_open=True, with_evidence=True,
             )
-            if reason:
-                return {'action': 'hold', 'reason': reason, 'positions': positions,
+            if block:
+                return {'action': 'hold', **block, 'positions': positions,
                         'entry_blocked': True, 'position_monitor_state': 'active',
+                        'blocked_stage': 'position_management', 'account_scope_verified': True,
+                        'entry_analysis_started': False,
                         'held_position_count': sum(abs(_number(item.get('quantity') or item.get('qty'))) > 0 for item in positions)}
         manager = self.position_management_service
         if callable(manager):
-            return dict(manager(db, **kwargs) or {})
-        return dict(manager.manage(db, **kwargs) or {})
+            result = dict(manager(db, **kwargs) or {})
+        else:
+            result = dict(manager.manage(db, **kwargs) or {})
+        result.setdefault('entry_blocked', bool(result.get('positions')))
+        result.setdefault('next_stage', 'profile_watchlist' if result.get('action') == 'entry_scan' else None)
+        result['open_orders_reliable'] = kwargs['snapshot'].get('open_orders_reliable', True)
+        result['open_sell_order_count'] = sum(
+            str(item.get('side')).lower() == 'sell'
+            and str(item.get('status')).upper() in _ACTIVE_ORDER_STATUSES
+            and (_optional_number(item.get('remaining_quantity')) or 0) > 0
+            for item in kwargs['snapshot'].get('open_orders', []) if isinstance(item, dict))
+        return result
 
     def _slots(
         self,
@@ -2468,9 +2556,19 @@ class UserAutoTradingSchedulerService:
         row = db.get(UserAutoTradingSlotClaim, int(claim.id))
         if row is None:
             return
+        was_retry = row.status == 'retry_pending'
         row.status = 'failed' if str(result.get('result') or '').lower() == 'failed' else 'completed'
         row.result = str(result.get('result') or '')[:40]
         row.reason = str(result.get('reason') or '')[:160]
+        # Retry callbacks finish outside the original dispatcher worker. Update
+        # only its still-active ledger row; never resurrect a timed-out slot.
+        from app.services.scheduler_slot_dispatcher import SchedulerSlotDispatcher
+        key = f'user-{row.user_id}:{row.provider}:{row.trading_date}:{row.scheduler_slot}'
+        ledger = db.query(AutomationSchedulerSlot).filter_by(slot_key=key).first()
+        if was_retry and ledger is not None and ledger.status in {'running', 'retry_pending'}:
+            ledger.status, ledger.reason = SchedulerSlotDispatcher._outcome(result)
+            ledger.finished_at = datetime.now(UTC).replace(tzinfo=None)
+            ledger.result_json = json.dumps(result, ensure_ascii=False, default=str)
         db.commit()
 
     @staticmethod
@@ -2680,6 +2778,8 @@ class UserAutoTradingSchedulerService:
         **kwargs: Any,
     ) -> dict[str, Any]:
         details = _failure_details(exception)
+        if getattr(exception, 'run_diagnostics', None):
+            details['run_diagnostics'] = exception.run_diagnostics
         if retry_diagnostics:
             details.update(retry_diagnostics)
         return self._record_result(

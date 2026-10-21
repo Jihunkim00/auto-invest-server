@@ -341,7 +341,16 @@ def account_snapshot_failure_diagnostics(
         if not isinstance(nested, Exception):
             break
         current = nested
+    safe_details: dict[str, Any] = {}
+    for item in _exception_chain(error):
+        details = getattr(item, 'details', None)
+        if isinstance(details, dict):
+            for key in ('http_status', 'msg_cd', 'error_type', 'read_operation',
+                        'owner_user_id', 'environment', 'queried_at', 'duration_ms'):
+                if key in details and key not in safe_details:
+                    safe_details[key] = details[key]
     return {
+        **safe_details,
         "retry_policy": "kis_account_snapshot",
         "attempts": int(attempt),
         "max_attempts": MAX_ATTEMPTS,

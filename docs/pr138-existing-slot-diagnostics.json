@@ -1,0 +1,129 @@
+{
+  "user": "test01",
+  "date": "2026-10-21",
+  "broker": "KIS",
+  "mode": "LIVE",
+  "slots": [
+    {
+      "slot": "11:30",
+      "scheduler": "HOLD",
+      "result": "HOLD",
+      "reason": "duplicate_open_sell_order",
+      "account_snapshot": "SUCCESS",
+      "held_positions": 0,
+      "open_sell_orders": null,
+      "position_management": "hold",
+      "blocked_stage": "position_management",
+      "final_stage": "done",
+      "exception_type": null,
+      "duplicate_evidence": {},
+      "watchlist": "200 / 200",
+      "profile_watchlist": "NOT REACHED",
+      "a_top5": "NOT REACHED",
+      "c_analyzed": "NOT REACHED",
+      "c65_passed": "NOT REACHED",
+      "gpt_attempted": "NOT REACHED",
+      "gpt_completed": "NOT REACHED",
+      "final_score": "NOT REACHED",
+      "risk_engine": "NOT REACHED",
+      "order": "NOT CALLED",
+      "order_status": null,
+      "scores": [],
+      "thresholds": {
+        "c_min": 65,
+        "gpt_min": 60,
+        "final_min": 65
+      },
+      "stage_durations_ms": {},
+      "retry": {},
+      "broker_submit_called": false
+    },
+    {
+      "slot": "12:30",
+      "scheduler": "failed",
+      "result": "failed",
+      "reason": "user_scheduler_processing_failed",
+      "account_snapshot": "FAILED",
+      "held_positions": null,
+      "open_sell_orders": null,
+      "position_management": "UNKNOWN",
+      "blocked_stage": "account_snapshot",
+      "final_stage": "account_snapshot",
+      "exception_type": "UserBrokerUnavailableError",
+      "duplicate_evidence": {},
+      "watchlist": "200 / 200",
+      "profile_watchlist": "NOT REACHED",
+      "a_top5": "NOT REACHED",
+      "c_analyzed": "NOT REACHED",
+      "c65_passed": "NOT REACHED",
+      "gpt_attempted": "NOT REACHED",
+      "gpt_completed": "NOT REACHED",
+      "final_score": "NOT REACHED",
+      "risk_engine": "NOT REACHED",
+      "order": "NOT CALLED",
+      "order_status": null,
+      "scores": [],
+      "thresholds": {
+        "c_min": 65,
+        "gpt_min": 60,
+        "final_min": 65
+      },
+      "stage_durations_ms": {},
+      "retry": {
+        "attempts": 3,
+        "max_attempts": 3
+      },
+      "broker_submit_called": false
+    },
+    {
+      "slot": "13:30",
+      "scheduler": "failed",
+      "result": "HOLD",
+      "reason": "duplicate_open_sell_order",
+      "account_snapshot": "SUCCESS",
+      "held_positions": 0,
+      "open_sell_orders": null,
+      "position_management": "hold",
+      "blocked_stage": "position_management",
+      "final_stage": "done",
+      "exception_type": null,
+      "duplicate_evidence": {},
+      "watchlist": "200 / 200",
+      "profile_watchlist": "NOT REACHED",
+      "a_top5": "NOT REACHED",
+      "c_analyzed": "NOT REACHED",
+      "c65_passed": "NOT REACHED",
+      "gpt_attempted": "NOT REACHED",
+      "gpt_completed": "NOT REACHED",
+      "final_score": "NOT REACHED",
+      "risk_engine": "NOT REACHED",
+      "order": "NOT CALLED",
+      "order_status": null,
+      "scores": [],
+      "thresholds": {
+        "c_min": 65,
+        "gpt_min": 60,
+        "final_min": 65
+      },
+      "stage_durations_ms": {},
+      "retry": {
+        "retry_policy": "kis_account_snapshot",
+        "attempts": 2,
+        "max_attempts": 3,
+        "retry_delay_seconds": 30
+      },
+      "broker_submit_called": false
+    }
+  ],
+  "current_unresolved_sell_orders": [
+    {
+      "local_order_id": 14,
+      "symbol": "028670",
+      "status": "UNKNOWN_STALE",
+      "created_at": "2026-10-14 02:30:21",
+      "sync_error": "kis_order_not_found_in_inquiry"
+    }
+  ],
+  "observation": "Existing database, SQLite mode=ro; historical slots are not rewritten.",
+  "observed_at_kst": "2026-10-21T20:01:23.247372+09:00"
+}

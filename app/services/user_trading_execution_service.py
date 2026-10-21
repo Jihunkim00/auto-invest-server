@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from app.services.scheduler_task_supervisor import check_scheduler_buy_allowed, check_scheduler_watchlist_ready
-
 import json
 import time
 import math
@@ -11,6 +9,12 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
+
+from app.services.automation_run_diagnostics import measure_stage
+from app.services.kis_snapshot_order_state import broker_order_block
+from app.services.scheduler_task_supervisor import (
+    SchedulerTaskExpired, check_scheduler_buy_allowed, check_scheduler_watchlist_ready,
+)
 
 from app.services.market_regime_trading_context import (
     get_run_market_regime_context,
@@ -416,13 +420,14 @@ class UserTradingExecutionService:
             }
         )
 
-        risk = self.risk_service.get_user_risk_state(
-            db,
-            user,
-            provider=normalized_provider,
-            market=market,
-            as_of=now_utc,
-        )
+        with measure_stage('risk_engine'):
+            risk = self.risk_service.get_user_risk_state(
+                db,
+                user,
+                provider=normalized_provider,
+                market=market,
+                as_of=now_utc,
+            )
         risk = dict(risk or {})
         risk_flags = [str(flag) for flag in risk.get("risk_flags") or []]
         duplicate_check = self._append_snapshot_risk_flags(
@@ -859,7 +864,7 @@ class UserTradingExecutionService:
             isinstance(item, dict)
             and str(item.get('symbol') or '').strip().upper() == requested_symbol
             and str(item.get('side') or '').strip().lower() == 'sell'
-            and str(item.get('status') or '').strip().upper() not in _TERMINAL_ORDER_STATUSES
+            and str(item.get('status') or '').strip().upper() not in (_TERMINAL_ORDER_STATUSES | {'INACTIVE'})
             for item in (snapshot.get('open_orders') or [])
         ):
             return self._finish_blocked(
@@ -1080,6 +1085,7 @@ class UserTradingExecutionService:
         sizing = kwargs['sizing']
         try:
             with AccountTradingLimitService().buy_execution_claim(db, owner_user_id=int(user.id)):
+                check_scheduler_buy_allowed()
                 db.refresh(user)
                 settings = self._settings(db, user)
                 db.refresh(settings)
@@ -1162,7 +1168,7 @@ class UserTradingExecutionService:
                     raise AccountTradingLimitError(preflight['reason'])
                 kwargs['credentials'] = credentials
                 return self._submit_kis_live_with_claim(db, run, **kwargs)
-        except AccountTradingLimitError as exc:
+        except (AccountTradingLimitError, SchedulerTaskExpired) as exc:
             return self._finish_blocked(db, run, user=user, base=base, reason=str(exc),
                                         analysis=kwargs['analysis'], risk=kwargs['risk'])
         except Exception:
@@ -1322,6 +1328,12 @@ class UserTradingExecutionService:
                 "execution": response_payload,
             }
             return self._finish_run(db, run, response)
+        except SchedulerTaskExpired as exc:
+            order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+            order.error_message = str(exc)
+            db.commit()
+            return self._finish_blocked(db, run, user=user, base=base,
+                reason=str(exc), analysis=analysis, risk=risk)
         except Exception as exc:
             order.internal_status = (InternalOrderStatus.UNKNOWN_STALE.value if broker_called and authorization_mode == 'automatic'
                                      else InternalOrderStatus.FAILED.value)
@@ -1882,6 +1894,11 @@ class UserTradingExecutionService:
             risk_flags.append("max_open_positions_reached")
 
         open_orders = snapshot.get("open_orders") if isinstance(snapshot, dict) else []
+        if snapshot.get('provider') == 'kis':
+            order_block = broker_order_block(snapshot)
+            if order_block:
+                risk_flags.append(order_block['reason'])
+                duplicate_check = {**order_block, 'block_reason': order_block['reason']}
         open_orders = open_orders if isinstance(open_orders, list) else []
         for item in open_orders:
             if not isinstance(item, dict):
@@ -1889,7 +1906,7 @@ class UserTradingExecutionService:
             if str(item.get("symbol") or "").strip().upper() != symbol:
                 continue
             status = str(item.get("status") or "").strip().upper()
-            if status not in {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "FILLED"}:
+            if status not in {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "FILLED", "INACTIVE"}:
                 risk_flags.append("duplicate_open_order")
                 duplicate_check = {'duplicate_check_source': 'broker',
                     'requested_order_owner_user_id': user.id, 'block_reason': 'duplicate_open_order'}
