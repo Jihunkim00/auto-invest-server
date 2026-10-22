@@ -83,7 +83,7 @@ SELL은 기존 정책을 유지한다. 관리자 TP/SL은 필수 lifecycle repla
 | 기존 관련 테스트 8개 파일 | 가상 시계·검증 가능한 Fake 주문·새 사유·감사 행·기존 관리자 skip 반환 형식을 명시하고 전역 Kill Switch 실차단을 검증 |
 | export_pr138_risk_verification.py / 보고서 JSON·Markdown | 통과한 전체 pytest 산출물만 집계하고 최초 차단 사유를 검증 |
 
-주문 #14의 실제 이력 조사·승인 대기 복구 서비스·별도 테스트·운영 상태는 [정합성 복구 보고서](pr138-order14-reconciliation.md)에 기록한다.
+주문 #14의 실제 이력 조사·사용자 승인 후 운영 FILLED 복구·별도 테스트·읽기 전용 차단 해제 확인은 [정합성 복구 보고서](pr138-order14-reconciliation.md)에 기록한다. 복구 작업에서 자동매매 강제 실행과 신규 실주문은 0회다.
 
 관리자 기존 주문의 NULL 소유권은 보존했다. 게이트 판정 수에는 후보별 5회 점수 검사와 제출 직전 재검사가 포함된다. 점수 관측의 duration_ms는 실제 Preview 단계 합계이고 checked_at은 결과 관측 완료 시각이다. 완전한 게이트 JSON은 같은 이름의 `.json` 파일에 있다.
 

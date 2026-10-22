@@ -1,0 +1,274 @@
+{
+  "started_at": "2026-10-22T07:10:43.398322+00:00",
+  "order_id": 14,
+  "owner_user_id": 2,
+  "username": "test01",
+  "approval_reference": "user-explicit-approval-2026-10-22-order14-UNKNOWN_STALE-to-FILLED-readonly-verification-no-trading",
+  "automation_invocations": 0,
+  "actual_kis_submit_count": 0,
+  "blocked_submit_attempts": 0,
+  "committed": true,
+  "before": {
+    "id": 14,
+    "owner_user_id": 2,
+    "broker": "kis",
+    "market": "KR",
+    "symbol": "028670",
+    "side": "sell",
+    "order_type": "market",
+    "qty": 5.0,
+    "requested_qty": 5.0,
+    "filled_qty": 0.0,
+    "remaining_qty": 5.0,
+    "internal_status": "UNKNOWN_STALE",
+    "broker_status": "submitted",
+    "broker_order_status": "not_found_in_inquiry",
+    "sync_error": "kis_order_not_found_in_inquiry",
+    "profile_id": null,
+    "profile_key": null,
+    "created_at_kst": "2026-10-14T11:30:21+09:00",
+    "submitted_at_kst": "2026-10-14T11:30:21.621677+09:00",
+    "filled_at_kst": null,
+    "last_synced_at_kst": "2026-10-19T17:12:17.794338+09:00",
+    "broker_order_id_masked": "***2100",
+    "trigger_source": "user_scheduler",
+    "request": {
+      "provider": "kis",
+      "mode": "alpaca_live",
+      "trigger_source": "user_scheduler",
+      "authorization_mode": "automatic",
+      "scheduler_slot": "11:30",
+      "exit_reason": "take_profit_triggered",
+      "signal_id": 78
+    },
+    "response": {
+      "status": "submitted",
+      "filled_qty": 0.0,
+      "submitted_at": "2026-10-14 02:30:21.621677+00:00"
+    }
+  },
+  "private_backup_created": true,
+  "before_local_gate": {
+    "database_mode": "ro/query_only",
+    "checked_at": "2026-10-22T07:10:43.530351+00:00",
+    "result": {
+      "reason": "local_unresolved_sell_order",
+      "duplicate_check_source": "local_order_log",
+      "local_order_id": 14,
+      "symbol": "028670",
+      "side": "sell",
+      "order_status": "UNKNOWN_STALE",
+      "order_source": "user_scheduler",
+      "remaining_quantity": 5.0,
+      "checked_at": "2026-10-22T07:10:43.530351+00:00",
+      "matched_order_owner_user_id": 2,
+      "requested_order_owner_user_id": 2,
+      "broker_last_synced_at": "2026-10-19 08:12:17.794338",
+      "broker_order_id_masked": "***2100"
+    },
+    "write_count": 0
+  },
+  "fresh_broker_verification": {
+    "history_checked_at": "2026-10-22T07:10:44.005989+00:00",
+    "snapshot_checked_at": "2026-10-22T07:10:44.039329+00:00",
+    "history_start": "20261014",
+    "history_end": "20261022",
+    "pages": 1,
+    "total_history_rows": 1,
+    "tr_id": "TTTC0081R",
+    "exchange": "ALL",
+    "plan": {
+      "order_id": 14,
+      "owner_user_id": 2,
+      "expected_fingerprint": "cd015b1ae9e15a381b49dc09d34b600d6cc39f3274d9afc8e104fbccee5cdd66",
+      "from_status": "UNKNOWN_STALE",
+      "to_status": "FILLED",
+      "filled_qty": 5.0,
+      "remaining_qty": 0.0,
+      "avg_fill_price": 7070.0,
+      "broker_order_id_masked": "***2100",
+      "verified_at": "2026-10-22T07:10:44.039329+00:00",
+      "history": {
+        "ord_dt": "20261014",
+        "ord_tmd": "113021",
+        "pdno": "028670",
+        "sll_buy_dvsn_cd": "01",
+        "ord_qty": "5",
+        "tot_ccld_qty": "5",
+        "rmn_qty": "0",
+        "rjct_qty": "0",
+        "cncl_yn": "",
+        "avg_prvs": "7070"
+      },
+      "history_complete": true,
+      "requires_user_approval": true,
+      "original_submission_payloads_preserved": true,
+      "broker_submit_called": false
+    },
+    "positions_count": 0,
+    "open_orders_count": 0,
+    "positions_reliable": true,
+    "open_orders_reliable": true,
+    "transport_calls": [
+      {
+        "method": "POST",
+        "path": "/oauth2/tokenP"
+      },
+      {
+        "method": "GET",
+        "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+        "tr_id": "TTTC0081R"
+      },
+      {
+        "method": "GET",
+        "path": "/uapi/domestic-stock/v1/trading/inquire-balance",
+        "tr_id": "TTTC8434R"
+      },
+      {
+        "method": "GET",
+        "path": "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
+        "tr_id": "TTTC0084R"
+      }
+    ]
+  },
+  "transaction_verification": {
+    "unchanged_other_tables_and_rows": true,
+    "tables_checked": 56,
+    "unchanged_rows_checked": 51259,
+    "changed_order_ids": [
+      14
+    ],
+    "inserted_audit_ids": [
+      233
+    ],
+    "changed_order_fields": [
+      "avg_fill_price",
+      "broker_order_status",
+      "broker_status",
+      "error_message",
+      "filled_avg_price",
+      "filled_qty",
+      "internal_status",
+      "last_sync_payload",
+      "last_synced_at",
+      "remaining_qty",
+      "sync_error",
+      "updated_at"
+    ],
+    "dml": [
+      {
+        "operation": "UPDATE",
+        "table": "orders",
+        "verified_rows": 1
+      },
+      {
+        "operation": "INSERT",
+        "table": "trade_run_logs",
+        "verified_rows": 1
+      }
+    ],
+    "original_submission_payloads_and_timestamps_preserved": true
+  },
+  "apply_result": {
+    "order_id": 14,
+    "audit_id": 233,
+    "internal_status": "FILLED",
+    "broker_submit_called": false,
+    "real_order_submitted": false
+  },
+  "applied_at": "2026-10-22T07:10:45.284611+00:00",
+  "after_local_gate": {
+    "database_mode": "ro/query_only",
+    "checked_at": "2026-10-22T07:10:46.601598+00:00",
+    "result": null,
+    "write_count": 0
+  },
+  "after": {
+    "id": 14,
+    "owner_user_id": 2,
+    "broker": "kis",
+    "market": "KR",
+    "symbol": "028670",
+    "side": "sell",
+    "order_type": "market",
+    "qty": 5.0,
+    "requested_qty": 5.0,
+    "filled_qty": 5.0,
+    "remaining_qty": 0.0,
+    "internal_status": "FILLED",
+    "broker_status": "filled",
+    "broker_order_status": "filled",
+    "sync_error": null,
+    "profile_id": null,
+    "profile_key": null,
+    "created_at_kst": "2026-10-14T11:30:21+09:00",
+    "submitted_at_kst": "2026-10-14T11:30:21.621677+09:00",
+    "filled_at_kst": null,
+    "last_synced_at_kst": "2026-10-22T16:10:45.284611+09:00",
+    "broker_order_id_masked": "***2100",
+    "trigger_source": "user_scheduler",
+    "request": {
+      "provider": "kis",
+      "mode": "alpaca_live",
+      "trigger_source": "user_scheduler",
+      "authorization_mode": "automatic",
+      "scheduler_slot": "11:30",
+      "exit_reason": "take_profit_triggered",
+      "signal_id": 78
+    },
+    "response": {
+      "status": "submitted",
+      "filled_qty": 0.0,
+      "submitted_at": "2026-10-14 02:30:21.621677+00:00"
+    }
+  },
+  "linked_runs_after": [
+    {
+      "id": 186,
+      "owner_user_id": 2,
+      "mode": "live",
+      "result": "submitted",
+      "reason": "user_exit_order_submitted",
+      "trigger_source": "user_scheduler",
+      "real_order_submitted": true,
+      "broker_submit_called": true,
+      "scheduler_slot": "11:30"
+    },
+    {
+      "id": 233,
+      "owner_user_id": 2,
+      "mode": "kis_order_reconciliation",
+      "result": "reconciled",
+      "reason": "broker_terminal_order_verified",
+      "trigger_source": "approved_order_reconciliation",
+      "real_order_submitted": false,
+      "broker_submit_called": false,
+      "scheduler_slot": null
+    }
+  ],
+  "after_fingerprint": "3172327af22331819daa23ddd9ac86099eb1c77b3fbcb878bf8474b65850314a",
+  "audit_verified_readonly": true,
+  "completed_at": "2026-10-22T07:10:46.605598+00:00",
+  "result": "APPLIED_AND_VERIFIED_READONLY",
+  "approval_obtained": true,
+  "approval_conditions": {
+    "refresh_exact_history_and_current_open_orders_before_apply": true,
+    "update_only_order14_and_append_one_audit": true,
+    "verify_local_gate_readonly": true,
+    "no_forced_automation_or_buy": true
+  },
+  "earlier_attempt": {
+    "committed": false,
+    "rolled_back": true,
+    "reason": "operator_expected_cursor_rowcount_one_for_insert_returning",
+    "production_order_and_audit_count_verified_unchanged_after_rollback": true
+  },
+  "operator_validation": {
+    "database": "isolated_copy",
+    "broker": "fake_history_and_snapshot",
+    "result": "PASS",
+    "actual_kis_submit_count": 0,
+    "other_rows_preserved": true
+  },
+  "next_slot_policy": "Existing scheduler, score gates, account risk, kill switches, market session and final submit checks decide at the next normal slot; no slot replay or forced execution."
+}

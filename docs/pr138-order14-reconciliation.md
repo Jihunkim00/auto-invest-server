@@ -1,6 +1,28 @@
 # PR138 test01 로컬 SELL #14 정합성 복구 검증
 
-KIS 과거 이력을 직접 대조한 결과, #14는 테스트 잔재가 아니라 **2026-10-14에 5주 전량 체결된 실제 SELL**이다. 로컬 DB만 `UNKNOWN_STALE / 체결 0 / 잔여 5`로 남아 신규 진입을 차단한다. 운영 DB 상태 변경은 사용자 요구사항 4에 따라 승인 대기 중이다.
+KIS 과거 이력을 직접 대조한 결과, #14는 테스트 잔재가 아니라 **2026-10-14에 5주 전량 체결된 실제 SELL**이다. 사용자의 명시적 승인 후 2026-10-22 16:10:45 KST에 운영 #14를 `UNKNOWN_STALE → FILLED / 체결 5 / 잔여 0`으로 복구했다. 실제 차단 함수를 읽기 전용으로 재확인하여 `local_unresolved_sell_order` 해제를 확인했다. 자동매매 강제 실행과 신규 실주문은 0회다.
+
+## 사용자 승인 후 운영 복구
+
+[마스킹한 운영 복구 증거](pr138-order14-approved-repair.json)에 승인 참조, 직전 KIS 조회, 변경 전후, 감사 로그, 읽기 전용 확인 결과를 저장했다.
+
+| 항목 | 결과 |
+|---|---|
+| 직전 KIS 주문·체결 조회 | 2026-10-22 16:10:44.005989 KST, 전체 거래소·전체 방향·전체 체결 상태, 1페이지 완료 |
+| 주문 대조 | test01 전용 live 자격증명, 동일 주문번호 `***2100`·주문일·종목·SELL·주문 수량 5주 일치 |
+| 실제 체결 | 5주 전량 체결, 잔여 0, 평균 7,070원 |
+| 직전 잔고·미체결 조회 | 16:10:44.039329 KST, 신뢰성 확인된 보유 0종목·미체결 0건 |
+| 운영 적용 | 16:10:45.284611 KST, 주문 #14 한 행 UPDATE + 감사 로그 #233 한 행 INSERT |
+| 복구 결과 | FILLED, 체결 5 / 잔여 0, 평균 체결가 7,070원, 동기화 오류 해제 |
+| 감사 로그 | owner 2 / order 14 / `approved_order_reconciliation` / `broker_terminal_order_verified`, 승인 참조·변경 전후·조회 근거 보존 |
+| 기존 자료 보존 | 원본 요청·응답·주문번호·생성·제출 시각 보존, 기존 inquiry 내용 보존 후 승인 근거 추가, 불명인 체결 시각과 손익은 생성하지 않음 |
+| 변경 범위 검증 | 쓰기 잠금 안에서 56개 테이블의 승인 대상 외 기존 51,259행 해시 동일, 관리자·test02 자료 포함 |
+| 읽기 전용 재확인 | 16:10:46.601598 KST, SQLite `mode=ro/query_only=ON`, 실제 `position_management_block_reason` 결과 `None` |
+| 강제 스케줄러 / BUY / 실주문·취소 | 모두 0회 |
+
+첫 운영 시도에서는 추가한 변경 범위 검사가 SQLite `INSERT ... RETURNING`의 결과 소비 전 cursor rowcount 0을 실패로 해석하여 커밋 전에 롤백했다. 직후 운영 #14가 원래 상태이고 복구 감사 행이 0건임을 읽기 전용으로 확인했다. 검사에서는 실제 삽입 행과 `changes()`를 대조하도록 조정했고, 격리된 DB와 Fake 이력·계좌로 전체 작업을 검증했다. 이후 KIS 이력·잔고·미체결을 새로 조회한 위 두 번째 시도에서만 커밋했다. 애플리케이션 코드는 변경하지 않았다.
+
+운영 복구 후 분석이나 BUY를 강제로 실행하지 않았다. 다음 정상 슬롯에서 기존 스케줄러와 점수·계정 리스크·Kill Switch·시장 시간·최종 제출 검사가 판단한다. 과거 슬롯을 재실행하거나 프로필·운영 설정을 변경하지 않았다. 아래 최초 조사와 테스트 DB 결과는 복구 전 근거로 보존한다.
 
 ## 읽기 전용으로 확인한 사실
 
@@ -36,11 +58,11 @@ KIS 과거 이력을 직접 대조한 결과, #14는 테스트 잔재가 아니�
 
 00:57 KST 추가 [읽기 전용 조회 비교](pr138-order14-inquiry-comparison.json)에서는 `TTTC0081R/KRX`, `TTTC8001R/거래소 생략`, `TTTC8001R/ALL` 모두 #14를 1건 반환했다. 따라서 구형 TR이나 거래소 조건만을 누락 원인으로 단정할 수 없다.
 
-## 승인할 수 있는 구체적 복구안
+## 승인받아 적용한 복구안
 
 범위는 **owner 2의 주문 #14 한 행과 해당 복구 감사 로그 1건**이다. 실행 경로에 자동 복구를 연결하지 않았다.
 
-| 필드 | 현재 | 제안 |
+| 필드 | 복구 전 | 승인 후 적용 |
 |---|---|---|
 | `internal_status` | UNKNOWN_STALE | FILLED |
 | `filled_qty` / `remaining_qty` | 0 / 5 | 5 / 0 |
@@ -93,7 +115,8 @@ KIS 과거 이력을 직접 대조한 결과, #14는 테스트 잔재가 아니�
 | python -m compileall app | exit 0 |
 | git diff --check | exit 0 |
 | 사용자 변경 파일 | .metadata, config/watchlist_kr.yaml, daily_ops_readonly.py 해시 동일 |
-| 운영 #14 재확인 | 원본 해시 동일, UNKNOWN_STALE / 체결 0 / 잔여 5, 복구 감사 행 0 |
+| 승인 전 운영 #14 재확인 | 원본 해시 동일, UNKNOWN_STALE / 체결 0 / 잔여 5, 복구 감사 행 0 |
+| 승인 후 운영 #14 재확인 | FILLED / 체결 5 / 잔여 0, 복구 감사 #233, 로컬 SELL 차단 없음 |
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest app/tests -q -p app.tests.no_external_transport --tb=short --basetemp=.tmp/pr138_release_verified -p no:cacheprovider --junitxml=.tmp/pr138_release_verified.xml
@@ -107,6 +130,6 @@ git diff --check
 | scripts/inspect_kis_local_order.py | 운영 SQLite 읽기 전용 조사, 소유자 전용 KIS 조회 전송기와 완전한 과거 이력 수집 |
 | app/tests/integration/test_pr138_order14_reconciliation.py | 복구 전후 실제 분석 경로, 계정 격리, 승인·상태·근거 오류 차단 |
 | app/tests/test_kis_order_reconciliation_readonly.py | DB 쓰기·실제 주문 URL 차단 및 이력 연속 조회 실패 검증 |
-| 이 보고서와 관련 JSON 3개 | 마스킹한 실제 대조·조회 비교·테스트 복구 결과를 분리하여 보존 |
+| 이 보고서와 관련 JSON 4개 | 마스킹한 실제 대조·조회 비교·테스트 복구·승인 후 운영 적용 결과를 분리하여 보존 |
 
-운영 #14는 현재도 `UNKNOWN_STALE`이며, 자동매매 차단 해제는 **사용자의 명시적 운영 DB 복구 승인 후**에만 가능하다. 조사와 테스트에서 실제 주문·취소·운영 DB 수정·서버 재시작·운영 설정 변경은 수행하지 않았다. 과거 #14의 실주문 사실과 이번 작업의 실제 submit 0회를 구분한다.
+운영 #14는 사용자 승인 후 `FILLED`로 복구했고, #14 때문에 발생하던 로컬 미해결 SELL 차단이 해제됐음을 읽기 전용으로 확인했다. 운영 DB 변경은 #14와 새 감사 로그 #233에 한정했다. 실제 주문·취소·자동매매 강제 실행·서버 재시작·운영 설정 변경은 수행하지 않았다. 과거 #14의 실주문 사실과 이번 작업의 실제 submit 0회를 구분한다.
