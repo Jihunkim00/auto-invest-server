@@ -1896,7 +1896,7 @@ def test_kis_snapshot_retry_recovers_on_second_attempt_without_new_claim(
     assert claim.status == 'retry_pending'
     assert claim.reason == 'account_snapshot_retry_pending_1_of_3'
     assert len(retries.pending) == 1
-    assert retries.pending[0][2] == 30
+    assert retries.pending[0][2] == 60
     assert calls['count'] == 1
 
     retries.run_next(clock)
@@ -1929,7 +1929,7 @@ def test_kis_snapshot_retry_recovers_on_third_attempt(db_session, monkeypatch):
 
     assert result['result'] == 'retry_pending'
     assert len(retries.pending) == 1
-    assert retries.run_next(clock) == 30
+    assert retries.run_next(clock) == 240
     assert len(retries.pending) == 1
     assert retries.run_next(clock) is None
     db_session.commit()
@@ -1961,7 +1961,7 @@ def test_kis_snapshot_retry_exhausts_after_three_attempts_with_diagnostics(
     db_session.commit()
 
     assert result['result'] == 'retry_pending'
-    assert retries.run_next(clock) == 30
+    assert retries.run_next(clock) == 240
     assert retries.run_next(clock) is None
     db_session.commit()
 
@@ -1980,7 +1980,7 @@ def test_kis_snapshot_retry_exhausts_after_three_attempts_with_diagnostics(
     assert response['retry_policy'] == 'kis_account_snapshot'
     assert response['attempts'] == 3
     assert response['max_attempts'] == 3
-    assert response['retry_delay_seconds'] == 30
+    assert response['retry_delay_seconds'] == 240
     assert response['final_failure_stage'] == 'account_snapshot'
     assert retries.pending == []
     assert len(broker.buy_calls) + len(broker.sell_calls) == 0

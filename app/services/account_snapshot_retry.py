@@ -3,8 +3,10 @@ from __future__ import annotations
 from contextvars import copy_context
 
 import logging
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable, Hashable
 
 import requests
@@ -12,14 +14,35 @@ import requests
 from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
 
 MAX_ATTEMPTS = 3
-RETRY_DELAY_SECONDS = 30
+RETRY_DELAYS_SECONDS = (60, 240)
+# Compatibility for callers displaying the first retry interval.
+RETRY_DELAY_SECONDS = RETRY_DELAYS_SECONDS[0]
 # Two KIS reads can each take 10 seconds on each of three snapshot attempts.
 RETRY_SLOT_REPLAY_GRACE_SECONDS = (
-    (MAX_ATTEMPTS - 1) * RETRY_DELAY_SECONDS + MAX_ATTEMPTS * 2 * 10 + 15
+    sum(RETRY_DELAYS_SECONDS) + MAX_ATTEMPTS * 2 * 10 + 15
 )
 _MAX_PENDING_RETRIES = 128
 _RETRY_WORKERS = 4
 logger = logging.getLogger(__name__)
+
+
+def account_snapshot_retry_delay(attempt: int) -> int:
+    """Delay after a failed attempt; attempt three is terminal."""
+    return RETRY_DELAYS_SECONDS[attempt - 1] if 1 <= attempt < MAX_ATTEMPTS else 0
+
+
+def account_snapshot_retry_timing(
+    *, attempt: int, now: datetime, retry_pending: bool,
+) -> dict[str, Any]:
+    delay = account_snapshot_retry_delay(attempt) if retry_pending else 0
+    return {
+        'attempt': attempt, 'attempts': attempt, 'max_attempts': MAX_ATTEMPTS,
+        'retry_delays_seconds': list(RETRY_DELAYS_SECONDS),
+        'retry_delay_seconds': delay or RETRY_DELAYS_SECONDS[max(0, min(attempt - 2, 1))],
+        'scheduled_retry_delay_seconds': delay,
+        'next_retry_at': (now + timedelta(seconds=delay)).isoformat() if delay else None,
+        'queried_at': now.isoformat(),
+    }
 
 
 class AccountSnapshotReadError(RuntimeError):
@@ -241,7 +264,7 @@ def retryable_kis_account_snapshot_error(error: Exception) -> bool:
         UserBrokerEncryptionUnavailableError,
         UserBrokerCredentialsUnavailableError,
     )
-    if any(isinstance(item, permanent_errors) for item in chain):
+    if any(isinstance(item, (*permanent_errors, KisAuthError, KisConfigurationError)) for item in chain):
         return False
 
     transient_types = {
@@ -330,6 +353,7 @@ def account_snapshot_failure_diagnostics(
     *,
     attempt: int,
     retryable: bool,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     current: Exception | None = error
     visited: set[int] = set()
@@ -349,13 +373,25 @@ def account_snapshot_failure_diagnostics(
                         'owner_user_id', 'environment', 'queried_at', 'duration_ms'):
                 if key in details and key not in safe_details:
                     safe_details[key] = details[key]
+    timing = account_snapshot_retry_timing(
+        attempt=attempt, now=now or datetime.now(UTC),
+        retry_pending=retryable and attempt < MAX_ATTEMPTS,
+    )
+    # KIS message codes are identifiers, never free-form broker response text.
+    code = str(safe_details.get('msg_cd') or '')
+    safe_details['msg_cd'] = code if re.fullmatch(r'[A-Z]{2,6}[0-9]{3,8}', code) else None
     return {
+        **timing,
         **safe_details,
         "retry_policy": "kis_account_snapshot",
         "attempts": int(attempt),
         "max_attempts": MAX_ATTEMPTS,
-        "retry_delay_seconds": RETRY_DELAY_SECONDS,
         "retryable": bool(retryable),
+        "outcome": 'retry_pending' if timing['scheduled_retry_delay_seconds'] else 'failed',
+        "final_failure_reason": (
+            None if timing['scheduled_retry_delay_seconds'] else
+            'account_snapshot_retry_exhausted' if retryable else 'account_snapshot_unavailable'
+        ),
         "failure_stage": "account_snapshot",
         "final_failure_stage": "account_snapshot",
         "exception_type": type(current).__name__ if current is not None else "RuntimeError",

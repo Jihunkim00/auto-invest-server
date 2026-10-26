@@ -214,14 +214,14 @@ def test_recovered_scheduler_runs_actual_full_pipeline(monkeypatch, tmp_path, gp
 
 
 def test_real_current_market_session_blocks_new_buy(monkeypatch):
-    # Deliberately no virtual clock. This checks the actual client-date session.
-    now = datetime.now(KST)
-    session = MarketSessionService().get_session_status('KR')
-    assert not session['is_market_open'], f'Expected post-close run, actual time={now.isoformat()}'
+    # A fixed trading day after close, independent of the host clock.
+    now = datetime(2026, 10, 20, 16, 0, tzinfo=KST)
+    session = MarketSessionService().get_session_status('KR', now=now)
+    assert not session['is_market_open']
     with SessionLocal() as db:
         harness = build_harness(db, monkeypatch, now=now, analysis_times=('11:20',))
         harness.market_sessions.is_open = False
-        scheduler = AutomationSchedulerService()
+        scheduler = AutomationSchedulerService(retry_now_provider=harness.clock.now)
         scheduler.runtime_settings = harness.runtime
         scheduler.automation_profiles = harness.profiles
         scheduler.automation_profile_buy_scheduler_service = harness.profile_buy
@@ -233,3 +233,9 @@ def test_real_current_market_session_blocks_new_buy(monkeypatch):
         assert harness.client.external_kis_submit_count == 0
         print('PR138_REAL_SESSION_RESULT=' + json.dumps({'at': now.isoformat(), 'status': 'BLOCKED',
             'reason': result['reason'], 'mock_submit_count': 0, 'actual_kis_submit_count': 0}))
+
+
+@pytest.mark.parametrize('hour,minute,is_open', [(11, 20, True), (12, 0, True), (16, 0, False)])
+def test_real_market_session_with_explicit_trading_day(hour, minute, is_open):
+    now = datetime(2026, 10, 20, hour, minute, tzinfo=KST)
+    assert MarketSessionService().get_session_status('KR', now=now)['is_market_open'] is is_open

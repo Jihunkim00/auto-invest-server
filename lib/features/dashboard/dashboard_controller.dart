@@ -1589,6 +1589,7 @@ class DashboardController extends ChangeNotifier {
     todayAiDecisionsLoaded = false;
     todayAiDecisionsRequested = true;
     todayAiDecisionsError = null;
+    todayAiDecisions = AutomationTodayDecisions.empty;
     unawaited(
       _loadTodayAiDecisions(
         userScoped: userScoped,
@@ -1612,6 +1613,7 @@ class DashboardController extends ChangeNotifier {
       if (_disposed || version != _todayAiDecisionRequestVersion) return;
       todayAiDecisions = AutomationTodayDecisions.empty;
       todayAiDecisionsError = '오늘 AI 판단을 불러오지 못했습니다.';
+      todayAiDecisionsLoaded = true;
     }
     if (!_disposed && version == _todayAiDecisionRequestVersion) {
       notifyListeners();

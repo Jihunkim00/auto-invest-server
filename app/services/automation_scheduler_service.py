@@ -50,6 +50,9 @@ from app.services.account_snapshot_retry import (
     POSITION_EXIT_MAX_RETRIES,
     POSITION_EXIT_RETRY_DELAY_SECONDS,
     account_snapshot_failure_diagnostics,
+    account_snapshot_retry_delay,
+    account_snapshot_retry_timing,
+    RETRY_DELAYS_SECONDS as ACCOUNT_SNAPSHOT_RETRY_DELAYS_SECONDS,
     account_snapshot_retry_coordinator,
     kis_exit_read_failure_diagnostics,
     retryable_kis_account_snapshot_error,
@@ -299,6 +302,7 @@ class AutomationSchedulerService(SchedulerService):
             'account_snapshot_retry': {
                 'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
                 'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                'retry_delays_seconds': list(ACCOUNT_SNAPSHOT_RETRY_DELAYS_SECONDS),
                 'pending_count': account_snapshot_retry_coordinator.pending_count(),
                 'admin_pending_count': account_snapshot_retry_coordinator.pending_count('admin'),
                 'user_pending_count': account_snapshot_retry_coordinator.pending_count('user'),
@@ -3679,7 +3683,9 @@ class AutomationSchedulerService(SchedulerService):
             error,
             attempt=attempt,
             retryable=retryable,
+            now=self.retry_now_provider(),
         )
+        logger.info('kis_account_snapshot_attempt scope=admin %s', json.dumps(diagnostics, ensure_ascii=False))
         if retryable and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS:
             if attempt == 1:
                 accepted = self._schedule_admin_account_snapshot_retry(
@@ -3700,7 +3706,7 @@ class AutomationSchedulerService(SchedulerService):
                     slot,
                     attempt,
                     ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
-                    ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                    account_snapshot_retry_delay(attempt),
                     diagnostics['exception_type'],
                 )
                 return {
@@ -3714,7 +3720,7 @@ class AutomationSchedulerService(SchedulerService):
                     'retry_policy': 'kis_account_snapshot',
                     'attempts': attempt,
                     'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
-                    'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                    **diagnostics,
                     'failure_stage': 'account_snapshot',
                     'real_order_submitted': False,
                     'broker_submit_called': False,
@@ -3737,7 +3743,7 @@ class AutomationSchedulerService(SchedulerService):
             slot,
             attempt,
             ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
-            ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+            account_snapshot_retry_delay(attempt),
             retryable,
             diagnostics['exception_type'],
         )
@@ -3800,13 +3806,18 @@ class AutomationSchedulerService(SchedulerService):
                 and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS
             ):
                 state['attempt'] = attempt + 1
-                return ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS
+                return account_snapshot_retry_delay(attempt)
             if (
                 isinstance(result, dict)
                 and result.get('status') != 'failed'
                 and result.get('status') != 'skipped'
                 and result.get('result') != 'failed'
             ):
+                logger.info('kis_account_snapshot_attempt scope=admin %s', json.dumps({
+                    **account_snapshot_retry_timing(attempt=attempt, now=retry_now, retry_pending=False),
+                    'outcome': 'success', 'failure_stage': None, 'http_status': None,
+                    'msg_cd': None, 'final_failure_reason': None,
+                }, ensure_ascii=False))
                 logger.info(
                     'kis account snapshot retry recovered scope=admin provider=kis market=KR profile_id=%s profile_key=%s slot=%s attempt=%s max_attempts=%s',
                     profile_id,
@@ -3827,7 +3838,7 @@ class AutomationSchedulerService(SchedulerService):
             self.retry_scheduler(
                 retry_key,
                 retry_callback,
-                delay_seconds=ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                delay_seconds=account_snapshot_retry_delay(1),
             )
         )
 

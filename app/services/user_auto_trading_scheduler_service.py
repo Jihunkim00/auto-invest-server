@@ -57,6 +57,8 @@ from app.services.account_snapshot_retry import (
     MAX_ATTEMPTS as ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
     RETRY_DELAY_SECONDS as ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
     account_snapshot_failure_diagnostics,
+    account_snapshot_retry_delay,
+    account_snapshot_retry_timing,
     account_snapshot_retry_coordinator,
     retryable_kis_account_snapshot_error,
 )
@@ -781,6 +783,7 @@ class UserAutoTradingSchedulerService:
                             exc,
                             attempt=1,
                             retryable=retryable,
+                            now=self.now_provider(),
                         )
                         if failure_stage == 'account_snapshot'
                         else None
@@ -869,7 +872,7 @@ class UserAutoTradingSchedulerService:
                 return None
             if outcome == 'retry_pending' and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS:
                 state['attempt'] = attempt + 1
-                return ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS
+                return account_snapshot_retry_delay(attempt)
             return None
 
         key = ('user', user_id, provider, market, trading_date, scheduler_slot)
@@ -904,17 +907,28 @@ class UserAutoTradingSchedulerService:
             'failure_stage': 'account_snapshot',
             'real_order_submitted': False,
             'broker_submit_called': False,
+            **{k: v for k, v in history[0].items() if k in {
+                'scheduled_retry_delay_seconds', 'next_retry_at', 'retry_delays_seconds'}},
             'account_snapshot_retry': {'attempt_history': history},
         }
 
     def _snapshot_attempt_event(self, error, *, attempt, result=None):
         event = account_snapshot_failure_diagnostics(
             error, attempt=attempt, retryable=retryable_kis_account_snapshot_error(error),
-        ) if error is not None else {'attempts': attempt, 'status': 'SUCCESS'}
+            now=self.now_provider(),
+        ) if error is not None else {
+            **account_snapshot_retry_timing(attempt=attempt, now=self.now_provider(), retry_pending=False),
+            'status': 'SUCCESS', 'outcome': 'success', 'failure_stage': None,
+            'http_status': None, 'msg_cd': None, 'final_failure_reason': None,
+        }
         event.setdefault('queried_at', self.now_provider().isoformat())
         trace = getattr(error, 'run_diagnostics', {}) if error else (result or {}).get('run_diagnostics', {})
         event.setdefault('duration_ms', (trace.get('stage_durations_ms') or {}).get('account_snapshot'))
         event['status'] = 'FAILED' if error else 'SUCCESS'
+        event.update({key: trace.get(key) for key in ('owner_user_id', 'profile_id', 'scheduler_slot')})
+        if error is None and not trace.get('account_snapshot'):
+            event.update(status='NOT_QUERIED', outcome='not_queried', queried_at=None,
+                         final_failure_reason=(result or {}).get('reason'))
         logger.info('kis_account_snapshot_attempt %s', json.dumps(event, ensure_ascii=False))
         return event
 
@@ -1128,7 +1142,7 @@ class UserAutoTradingSchedulerService:
                         scheduler_slot,
                         attempt,
                         ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
-                        ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                        account_snapshot_retry_delay(attempt),
                         _failure_details(exc)['exception_type'],
                     )
                     return 'retry_pending'
@@ -1142,6 +1156,7 @@ class UserAutoTradingSchedulerService:
                         exc,
                         attempt=attempt,
                         retryable=retryable,
+                        now=self.now_provider(),
                     )
                     if failure_stage == 'account_snapshot'
                     else None
@@ -1182,7 +1197,7 @@ class UserAutoTradingSchedulerService:
                     scheduler_slot,
                     attempt,
                     ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
-                    ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                    account_snapshot_retry_delay(attempt),
                     retryable,
                     _failure_details(exc)['exception_type'],
                 )
@@ -1193,7 +1208,7 @@ class UserAutoTradingSchedulerService:
                 'retry_policy': 'kis_account_snapshot',
                 'attempts': attempt,
                 'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
-                'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                **account_snapshot_retry_timing(attempt=attempt, now=self.now_provider(), retry_pending=False),
                 'attempt_history': history,
             }
             item['account_snapshot_retry'] = retry_diagnostics

@@ -12,6 +12,7 @@ class AutomationTodayDecisions {
     required this.ownerUserId,
     required this.profileStatus,
     required this.slots,
+    this.executionHistory = const <AutomationTodayDecisionSlot>[],
   });
 
   static const empty = AutomationTodayDecisions(
@@ -37,6 +38,7 @@ class AutomationTodayDecisions {
   final int? ownerUserId;
   final String? profileStatus;
   final List<AutomationTodayDecisionSlot> slots;
+  final List<AutomationTodayDecisionSlot> executionHistory;
 
   bool get hasProfile => profileId != null;
   bool get isLoadedForToday => tradeDateKst.isNotEmpty;
@@ -64,6 +66,12 @@ class AutomationTodayDecisions {
                   ))
               .toList(growable: false)
           : const <AutomationTodayDecisionSlot>[],
+      executionHistory: (json['execution_history'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => AutomationTodayDecisionSlot.fromJson(
+                Map<String, dynamic>.from(item),
+              ))
+          .toList(growable: false),
     );
   }
 }
@@ -105,6 +113,12 @@ class AutomationTodayDecisionSlot {
     required this.createdAtKst,
     required this.quantRank,
     required this.aiRank,
+    this.analysisCandidates = const <Candidate>[],
+    this.gptBuyScore,
+    this.gptAnalysisStatus,
+    this.failureStage,
+    this.httpStatus,
+    this.finalFailureReason,
   });
 
   final String schedulerSlot;
@@ -142,14 +156,27 @@ class AutomationTodayDecisionSlot {
   final String? createdAtKst;
   final int? quantRank;
   final int? aiRank;
+  final List<Candidate> analysisCandidates;
+  final double? gptBuyScore;
+  final String? gptAnalysisStatus;
+  final String? failureStage;
+  final int? httpStatus;
+  final String? finalFailureReason;
+
+  List<Candidate> get auditCandidates =>
+      scoreGateCandidates.isNotEmpty ? scoreGateCandidates : analysisCandidates;
 
   bool get hasResult =>
-      status == 'result' && (symbol?.trim().isNotEmpty ?? false);
+      hasAnalysisResult && (symbol?.trim().isNotEmpty ?? false);
+  bool get isFailed => status == 'failed';
   bool get hasAnalysisResult =>
       status == 'result' || status == 'analysis_complete';
   bool get isQuantHold =>
       status == 'analysis_complete' &&
       gptTargetSymbols.isEmpty &&
+      gptCompletedSymbols.isEmpty &&
+      !analysisCandidates.any((item) =>
+          item.gptUsed == true || item.gptAnalysisStatus == 'completed') &&
       finalCandidateSymbols.isEmpty;
   bool get isPending => status == 'analysis_pending';
   bool get isPositionRefreshPending =>
@@ -157,7 +184,37 @@ class AutomationTodayDecisionSlot {
   bool get isEntryRecoveryBlocked => status == 'blocked';
 
   factory AutomationTodayDecisionSlot.fromJson(Map<String, dynamic> json) {
+    final analyses = _candidates(json['analysis_candidates']);
+    final summaryCandidates = analyses.isNotEmpty
+        ? analyses
+        : _candidates(json['score_gate_candidates']);
+    // Older servers can supply audit rows without top-level summary fields.
+    if (json['status'] == 'analysis_complete' &&
+        _nullableString(json['symbol']) == null) {
+      final completed = summaryCandidates.where(
+        (item) => item.gptAnalysisStatus == 'completed',
+      );
+      if (completed.isNotEmpty) {
+        final candidate = completed.first;
+        json = {
+          ...json,
+          'symbol': candidate.symbol,
+          'symbol_name': candidate.name,
+          'gpt_buy_score': candidate.gptBuyScore ?? candidate.aiBuyScore,
+          'gpt_analysis_status': candidate.gptAnalysisStatus,
+          'final_buy_score': candidate.finalBuyScore,
+          'ai_reason': candidate.aiReason,
+          'reason': candidate.blockReason ?? json['reason'],
+        };
+      }
+    }
     return AutomationTodayDecisionSlot(
+      analysisCandidates: analyses,
+      gptBuyScore: _double(json['gpt_buy_score']),
+      gptAnalysisStatus: _nullableString(json['gpt_analysis_status']),
+      failureStage: _nullableString(json['failure_stage']),
+      httpStatus: _int(json['http_status']),
+      finalFailureReason: _nullableString(json['final_failure_reason']),
       schedulerSlot: _string(json['scheduler_slot'] ?? json['schedulerSlot']),
       status: _string(json['status']).isEmpty
           ? 'no_result'

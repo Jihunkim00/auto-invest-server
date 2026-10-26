@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.constants import A_TOP5_GPT_MIN_BUY_SCORE
 from app.db.models import (
     AutomationProfileAiCandidateResult,
     AutomationProfileWatchlistItem,
@@ -70,6 +71,8 @@ class AutomationTodayDecisionService:
             start=_local_boundary(local_date, timezone),
             end=_local_boundary(local_date + timedelta(days=1), timezone),
         )
+        runs = [run for run in runs if _matches_profile(run, profile)]
+        configured_slots = self._slots(schedule)
         decisions = [
             self._decision_for_slot(
                 db,
@@ -81,8 +84,19 @@ class AutomationTodayDecisionService:
                 now=current,
                 admin_user_id=admin_user_id,
             )
-            for slot in self._slots(schedule)
+            for slot in configured_slots
         ]
+        # Keep executions from an earlier schedule separate from today's configuration.
+        historical_slots = sorted({
+            _run_slot(run) for run in runs
+            if _valid_slot(_run_slot(run)) and _run_slot(run) not in configured_slots
+            and _profile_context(_json(run.request_payload), _json(run.response_payload))
+        })
+        history = [self._decision_for_slot(
+            db, run=self._run_for_slot(runs, slot, current, timezone),
+            profile=profile, schedule=schedule, slot=slot, local_date=local_date,
+            now=current, admin_user_id=admin_user_id,
+        ) for slot in historical_slots]
         return {
             'trade_date_kst': local_date.isoformat(),
             'timezone': str(schedule.get('timezone') or 'Asia/Seoul'),
@@ -98,6 +112,7 @@ class AutomationTodayDecisionService:
             ),
             'profile_status': schedule.get('status'),
             'slots': decisions,
+            'execution_history': history,
         }
 
     def _schedule(
@@ -183,7 +198,9 @@ class AutomationTodayDecisionService:
         )
         candidates = [
             run for run in runs
-            if abs(
+            if run.trigger_source == 'automation_scheduler'
+            and not _run_slot(run)
+            and abs(
                 (_aware_utc(run.created_at) - target.astimezone(UTC)).total_seconds()
             ) <= 15 * 60
         ]
@@ -210,6 +227,7 @@ class AutomationTodayDecisionService:
             admin_user_id=admin_user_id,
             local_date=local_date,
             slot=slot,
+            run_id=run.id if run is not None else None,
         )
         base = {
             'scheduler_slot': slot,
@@ -254,6 +272,26 @@ class AutomationTodayDecisionService:
         context_key = str(context.get('profile_key') or '').strip().lower()
         if profile_key and context_key and profile_key != context_key:
             return base
+        created_at = _aware_utc(run.created_at)
+        execution = {
+            'signal_status': run.result, 'run_id': run.id, 'run_key': run.run_key,
+            'signal_id': run.signal_id,
+            'created_at': created_at.isoformat().replace('+00:00', 'Z'),
+            'created_at_kst': created_at.astimezone(KST).isoformat(),
+        }
+        # Snapshot failures can happen before any watchlist or GPT row exists.
+        if (run.mode != 'automation_entry_slot_recovery'
+                and str(run.result or '').lower() in {'failed', 'retry_pending', 'blocked'}):
+            if not context and pipeline.get('profile_snapshot_id') is None:
+                return base
+            return {
+                **base, **execution, 'status': str(run.result).lower(),
+                'action': 'hold', 'reason': response.get('reason') or run.reason,
+                **{key: response.get(key) for key in (
+                    'failure_stage', 'http_status', 'msg_cd', 'attempts', 'max_attempts',
+                    'retry_delay_seconds', 'next_retry_at', 'final_failure_reason',
+                )},
+            }
         if run.mode == 'automation_entry_slot_recovery':
             created_at = _aware_utc(run.created_at)
             return {
@@ -279,8 +317,12 @@ class AutomationTodayDecisionService:
         if symbol in _INVALID_SYMBOLS:
             # A completed scheduler run may have no executable symbol when the
             # C gate produces no GPT/final candidate. This is not no_result.
-            if pipeline.get('profile_snapshot_id') is None:
+            if (pipeline.get('profile_snapshot_id') is None
+                    and not pipeline.get('analysis_candidates')):
                 return base
+            analyses = pipeline.get('analysis_candidates') or []
+            completed = next((item for item in analyses
+                              if item.get('gpt_analysis_status') == 'completed'), {})
             created_at = _aware_utc(run.created_at)
             return {
                 **base,
@@ -290,7 +332,17 @@ class AutomationTodayDecisionService:
                 'run_key': run.run_key,
                 'signal_id': run.signal_id,
                 'action': 'hold',
-                'reason': 'no_completed_gpt_final_candidate',
+                'symbol': completed.get('symbol'),
+                'symbol_name': completed.get('symbol_name'),
+                'gpt_buy_score': completed.get('gpt_buy_score'),
+                'gpt_analysis_status': completed.get('gpt_analysis_status'),
+                'final_buy_score': completed.get('final_buy_score'),
+                'final_sell_score': completed.get('final_sell_score'),
+                'confidence': completed.get('confidence'),
+                'ai_reason': completed.get('ai_reason'),
+                'reason': (completed.get('block_reason')
+                           or (run.reason if run.reason not in {'hold', 'HOLD'} else None)
+                           or 'no_completed_gpt_final_candidate'),
                 'created_at': created_at.isoformat().replace('+00:00', 'Z'),
                 'created_at_kst': created_at.astimezone(KST).isoformat(),
             }
@@ -382,6 +434,7 @@ class AutomationTodayDecisionService:
         admin_user_id: int | None,
         local_date: date,
         slot: str,
+        run_id: int | None = None,
     ) -> dict[str, Any]:
         empty = {
             'profile_snapshot_id': None,
@@ -400,6 +453,7 @@ class AutomationTodayDecisionService:
             'final_candidate_count': 0,
             'final_ranked_top5': [],
             'score_gate_candidates': [],
+            'analysis_candidates': [],
             'final_selected_symbol': None,
         }
         if profile_id is None:
@@ -447,6 +501,8 @@ class AutomationTodayDecisionService:
             AutomationProfileAiCandidateResult.runtime_quant_rank.asc(),
             AutomationProfileAiCandidateResult.id.asc(),
         ).all()
+        if run_id is not None:
+            rows = [row for row in rows if row.run_id in {None, run_id}]
         if not rows:
             if snapshot is None:
                 return empty
@@ -468,6 +524,15 @@ class AutomationTodayDecisionService:
                 diagnostics = {}
             score_gate = diagnostics.get("candidate_score_gate")
             score_gate = score_gate if isinstance(score_gate, dict) else {}
+            rejection = next((item for item in (diagnostics.get('candidate_rejections') or [])
+                              if isinstance(item, dict) and item.get('symbol') == row.symbol), {})
+            detail = {**rejection, **score_gate}
+            gpt_score = _first(detail.get('gpt_buy_score'), row.ai_buy_score)
+            reason = detail.get('block_reason') or detail.get('skip_reason')
+            if (not reason and row.gpt_used and row.gpt_analysis_status == 'completed'
+                    and isinstance(gpt_score, (int, float))
+                    and gpt_score < A_TOP5_GPT_MIN_BUY_SCORE):
+                reason = 'gpt_buy_score_below_threshold'
             return {
                 'symbol': row.symbol,
                 'name': row.symbol_name,
@@ -492,17 +557,18 @@ class AutomationTodayDecisionService:
                 'entry_ready': False,
                 'action': 'watch',
                 'action_hint': 'watch',
-                'quant_c_score': score_gate.get('quant_c_score'),
+                'quant_c_score': detail.get('quant_c_score'),
                 'quant_c_status': score_gate.get('quant_c_status'),
                 'quant_c_threshold': score_gate.get('quant_c_threshold'),
                 'quant_c_gate_passed': score_gate.get('quant_c_gate_passed'),
-                'gpt_buy_score': score_gate.get('gpt_buy_score'),
+                'gpt_buy_score': gpt_score,
                 'gpt_analysis_status': score_gate.get('gpt_analysis_status') or row.gpt_analysis_status,
-                'gpt_buy_score_threshold': score_gate.get('gpt_buy_score_threshold'),
+                'gpt_buy_score_threshold': _first(detail.get('gpt_buy_score_threshold'),
+                                                 detail.get('required_gpt_buy_score')),
                 'gpt_buy_score_gate_passed': score_gate.get('gpt_buy_score_gate_passed'),
                 'a_top5_score_gate_passed': score_gate.get('a_top5_score_gate_passed'),
                 'a_top5_score_gate_reason': score_gate.get('a_top5_score_gate_reason'),
-                'block_reason': score_gate.get('block_reason'),
+                'block_reason': reason,
                 'candidate_score_gate': score_gate,
             }
 
@@ -557,6 +623,11 @@ class AutomationTodayDecisionService:
             'final_candidate_count': len(final_rows),
             'final_ranked_top5': final_items,
             'score_gate_candidates': score_gate_items,
+            'analysis_candidates': [
+                item for row in rows for item in [candidate(row)]
+                if row.gpt_used or row.gpt_target_rank is not None
+                or item.get('quant_c_score') is not None
+            ],
             'final_selected_symbol': next(
                 (row.symbol for row in final_rows if row.final_selected),
                 final_rows[0].symbol if final_rows else None,
@@ -614,6 +685,26 @@ def _json(value: str | None) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _run_slot(run: TradeRunLog) -> str:
+    request, response = _json(run.request_payload), _json(run.response_payload)
+    return str(request.get('scheduler_slot') or response.get('scheduler_slot')
+               or response.get('slot_kst') or '')
+
+
+def _matches_profile(run: TradeRunLog, profile: dict[str, Any]) -> bool:
+    request, response = _json(run.request_payload), _json(run.response_payload)
+    context = _profile_context(request, response)
+    if context.get('profile_id') is not None and context['profile_id'] != _int_or_none(profile.get('id')):
+        return False
+    key = str(context.get('profile_key') or '').lower()
+    if key and key != str(profile.get('profile_key') or '').lower():
+        return False
+    return all(
+        not payload.get(field) or str(payload[field]).lower() == str(profile.get(field) or '').lower()
+        for payload in (request, response) for field in ('provider', 'market')
+    )
 
 
 def _profile_context(*payloads: dict[str, Any]) -> dict[str, Any]:
