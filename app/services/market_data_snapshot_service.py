@@ -51,12 +51,15 @@ class MarketDataSnapshotService:
         daily_bars: list[dict[str, Any]] = []
         quote_error: str | None = None
         daily_error: str | None = None
+        quote_error_details = daily_error_details = None
 
         self._stats['price_request_count'] += 1
         try:
             quote = self.client.get_domestic_stock_price(normalized_symbol)
         except Exception as exc:
             quote_error = _safe_error(exc)
+            from app.services.watchlist_snapshot_policy import safe_snapshot_error
+            quote_error_details = safe_snapshot_error(exc, stage='quote')
 
         try:
             daily_bars, daily_metadata = self.get_daily_bars(
@@ -70,6 +73,8 @@ class MarketDataSnapshotService:
                 'daily_cache_key': self._cache_key(normalized_symbol),
             }
             daily_error = _safe_error(exc)
+            from app.services.watchlist_snapshot_policy import safe_snapshot_error
+            daily_error_details = safe_snapshot_error(exc, stage='daily')
 
         return {
             'symbol': normalized_symbol,
@@ -78,6 +83,8 @@ class MarketDataSnapshotService:
             'captured_at': captured_at,
             'quote_error': quote_error,
             'daily_error': daily_error,
+            'quote_error_details': quote_error_details,
+            'daily_error_details': daily_error_details,
             'daily_cache_hit': bool(daily_metadata.get('daily_cache_hit')),
             'daily_cache_miss': bool(daily_metadata.get('daily_cache_miss')),
             'daily_cache_key': daily_metadata.get('daily_cache_key'),

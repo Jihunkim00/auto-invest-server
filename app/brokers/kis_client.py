@@ -1044,6 +1044,8 @@ class KisClient:
             from app.services.scheduler_task_supervisor import check_scheduler_task_active
             if request_kind == 'read_only':
                 check_scheduler_task_active()
+                from app.services.watchlist_snapshot_policy import check_snapshot_read
+                check_snapshot_read()
             headers = self.build_headers(
                 tr_id=tr_id,
                 include_auth=True,

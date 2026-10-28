@@ -231,6 +231,50 @@ class WatchlistSnapshotRun(Base):
     status = Column(String(20), nullable=False, default='running', index=True)
 
 
+class WatchlistSnapshotRecovery(Base):
+    """Durable, bounded read-only recovery chain; never an execution job."""
+    __tablename__ = 'watchlist_snapshot_recoveries'
+    id = Column(Integer, primary_key=True)
+    root_run_id = Column(Integer, ForeignKey('watchlist_snapshot_runs.id'), nullable=False, unique=True)
+    latest_run_id = Column(Integer, ForeignKey('watchlist_snapshot_runs.id'), nullable=False)
+    market = Column(String(10), nullable=False, index=True)
+    gate_level = Column(Integer, nullable=False)
+    universe_hash = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    initial_read_calls = Column(Integer, nullable=False, default=0)
+    recovery_read_calls = Column(Integer, nullable=False, default=0)
+    deadline_at = Column(DateTime(timezone=True), nullable=False)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    reason_code = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class WatchlistSnapshotError(Base):
+    """Allowlisted diagnostics only: no provider message, URL or payload."""
+    __tablename__ = 'watchlist_snapshot_errors'
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey('watchlist_snapshot_runs.id'), nullable=False, index=True)
+    symbol = Column(String(6), nullable=True, index=True)
+    stage = Column(String(20), nullable=False)
+    reason_code = Column(String(64), nullable=False)
+    exception_type = Column(String(40), nullable=True)
+    http_status = Column(Integer, nullable=True)
+    retryable = Column(Boolean, nullable=False, default=False)
+    attempt = Column(Integer, nullable=False)
+    resolved = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class WatchlistSnapshotRefreshClaim(Base):
+    """Cross-process single flight with fencing against late workers."""
+    __tablename__ = 'watchlist_snapshot_refresh_claims'
+    market = Column(String(10), primary_key=True)
+    token = Column(String(64), nullable=False)
+    run_id = Column(Integer, ForeignKey('watchlist_snapshot_runs.id'), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class WatchlistSnapshotItem(Base):
     '''Per-symbol data belonging to a watchlist snapshot run.'''
 

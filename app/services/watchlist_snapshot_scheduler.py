@@ -50,7 +50,7 @@ class WatchlistSnapshotScheduler:
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
         with self._lifecycle_lock:
-            if self._thread is thread:
+            if self._thread is thread and (thread is None or not thread.is_alive()):
                 self._thread = None
 
     def _run(self) -> None:
@@ -62,12 +62,23 @@ class WatchlistSnapshotScheduler:
             if now.strftime('%H:%M') in WATCHLIST_REFRESH_TIMES and slot != last_slot:
                 self._run_refresh(reason='scheduled_slot')
                 last_slot = slot
+            else:
+                self._recover_due()
             self._stop_event.wait(self.poll_seconds)
 
     def _bootstrap_if_needed(self) -> None:
         try:
+            if self._recover_due() is not None:
+                return
             should_refresh = False
             with self.session_factory() as db:
+                latest_recovery = getattr(self.service, 'latest_recovery', None)
+                job = latest_recovery(db) if callable(latest_recovery) else None
+                if (job and job.status != 'succeeded'
+                        and job.created_at.replace(tzinfo=UTC).astimezone(KST).date() == self._now_kst().date()):
+                    # A restart cannot reset today's pending/exhausted budget.
+                    # The next normal scheduled refresh may start a new chain.
+                    return
                 latest = self.service.latest_successful_run(db, market='KR')
                 should_refresh = (
                     latest is None
@@ -76,16 +87,34 @@ class WatchlistSnapshotScheduler:
             if should_refresh:
                 self._run_refresh(reason='startup_snapshot_missing_or_stale')
         except Exception:
-            logger.exception('watchlist snapshot bootstrap check failed')
+            logger.warning('watchlist_snapshot_bootstrap_failed reason_code=snapshot_storage_unavailable')
+
+    def _recover_due(self):
+        recover = getattr(self.service, 'recover_due', None)
+        if not callable(recover):
+            return None
+        try:
+            with self.session_factory() as db:
+                return recover(db, cancel_event=self._stop_event)
+        except Exception:
+            logger.warning('watchlist_snapshot_recovery_failed reason_code=snapshot_storage_unavailable')
+            return None
 
     def _run_refresh(self, *, reason: str) -> None:
         try:
             with self.session_factory() as db:
-                result = self.service.refresh(db, market='KR')
+                if reason == 'scheduled_slot' and isinstance(self.service, WatchlistSnapshotService):
+                    latest = self.service.latest_run(db)
+                    if latest and latest.started_at.replace(tzinfo=UTC).astimezone(KST).strftime('%Y-%m-%d %H:%M') == self._now_kst().strftime('%Y-%m-%d %H:%M'):
+                        return  # Bootstrap/another process already covered this slot.
+                if isinstance(self.service, WatchlistSnapshotService):
+                    result = self.service.refresh(db, market='KR', cancel_event=self._stop_event)
+                else:
+                    result = self.service.refresh(db, market='KR')
                 if result.get('status') == 'already_running':
                     logger.info('watchlist snapshot refresh skipped reason=already_running trigger=%s', reason)
         except Exception:
-            logger.exception('watchlist snapshot refresh failed trigger=%s', reason)
+            logger.warning('watchlist_snapshot_refresh_failed trigger=%s reason_code=snapshot_storage_unavailable', reason)
 
     def _now_kst(self) -> datetime:
         value = self.now_provider()

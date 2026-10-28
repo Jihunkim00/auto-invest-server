@@ -20,7 +20,6 @@ from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.models import WatchlistSnapshotItem, WatchlistSnapshotRun
 from app.services.market_data_snapshot_service import MarketDataSnapshotService
 from app.services.quant_signal_service import QuantSignalService
-from app.services.scheduler_task_supervisor import check_scheduler_task_active
 from app.services.technical_indicator_service import (
     EMPTY_TECHNICAL_INDICATORS,
     TechnicalIndicatorService,
@@ -53,7 +52,11 @@ class WatchlistSnapshotService:
                  quant_signal_service: QuantSignalService | None = None,
                  market_data_service_factory: Callable[[Any], MarketDataSnapshotService]
                  | None = None,
-                 now_provider: Callable[[], datetime] | None = None) -> None:
+                 now_provider: Callable[[], datetime] | None = None,
+                 wait_provider: Callable[[float], bool | None] | None = None,
+                 monotonic_provider: Callable[[], float] = time.monotonic) -> None:
+        self.wait_provider = wait_provider
+        self.monotonic_provider = monotonic_provider
         self.client = client
         self.client_factory = client_factory or self._default_client_factory
         self.universe_path = Path(universe_path)
@@ -104,104 +107,37 @@ class WatchlistSnapshotService:
         return result
 
     def refresh(self, db: Session, *, market: str = 'KR',
-                gate_level: int = DEFAULT_GATE_LEVEL) -> dict[str, Any]:
-        normalized_market = str(market or 'KR').strip().upper()
-        if normalized_market != 'KR':
+                gate_level: int = DEFAULT_GATE_LEVEL, cancel_event=None) -> dict[str, Any]:
+        if str(market or 'KR').strip().upper() != 'KR':
             raise ValueError('Watchlist snapshot currently supports KR only.')
-        if not self._refresh_lock.acquire(blocking=False):
-            return {
-                'status': 'already_running',
-                'market': normalized_market,
-                'message': 'A watchlist snapshot refresh is already running.',
-            }
+        from app.services.watchlist_snapshot_recovery import SnapshotRecoveryCoordinator
+        return SnapshotRecoveryCoordinator(self, db, cancel_event).refresh(gate_level=gate_level)
 
-        started_at = self._now_utc()
-        started_monotonic = time.monotonic()
-        run: WatchlistSnapshotRun | None = None
-        try:
-            universe = self.load_universe()
-            run = WatchlistSnapshotRun(
-                market=normalized_market,
-                started_at=started_at,
-                source_count=len(universe),
-                status='running',
-            )
-            db.add(run)
-            db.commit()
-            db.refresh(run)
+    def recover_due(self, db: Session, *, cancel_event=None):
+        from app.services.watchlist_snapshot_recovery import SnapshotRecoveryCoordinator
+        return SnapshotRecoveryCoordinator(self, db, cancel_event).recover_due()
 
-            items: list[WatchlistSnapshotItem] = []
-            scored_count = 0
-            error_count = 0
-            client = self.client or self.client_factory(db)
-            market_data = self.market_data_service_factory(client)
+    def error_details(self, db: Session, run_id: int):
+        from app.db.models import WatchlistSnapshotError
+        return [{key: getattr(error, key) for key in (
+            'symbol', 'stage', 'reason_code', 'exception_type', 'http_status',
+            'retryable', 'attempt', 'resolved')}
+            for error in db.query(WatchlistSnapshotError).filter_by(run_id=run_id)
+            .order_by(WatchlistSnapshotError.id).all()]
 
-            for source in universe:
-                check_scheduler_task_active()
-                item, scored, had_error = self._build_item(
-                    source,
-                    market_data=market_data,
-                    gate_level=gate_level,
-                )
-                items.append(WatchlistSnapshotItem(
-                    run_id=run.id,
-                    symbol=item['symbol'],
-                    name=item['name'],
-                    market=item['market'],
-                    current_price=item['current_price'],
-                    quant_buy_score=item['quant_buy_score'],
-                    quant_sell_score=item['quant_sell_score'],
-                    indicators_json=item['indicators_json'],
-                    quant_reason=item['quant_reason'],
-                    captured_at=item['captured_at'],
-                ))
-                scored_count += int(scored)
-                error_count += int(had_error)
+    def latest_recovery(self, db: Session):
+        from app.db.models import WatchlistSnapshotRecovery
+        latest = self.latest_run(db)
+        return (db.query(WatchlistSnapshotRecovery).filter_by(latest_run_id=latest.id).first()
+                if latest else None)
 
-            db.add_all(items)
-            run.scored_count = scored_count
-            run.error_count = error_count
-            run.completed_at = self._now_utc()
-            run.elapsed_seconds = round(time.monotonic() - started_monotonic, 3)
-            run.status = (
-                'success'
-                if universe and scored_count == len(universe) and error_count == 0
-                else 'failed'
-            )
-            db.commit()
-            db.refresh(run)
-            payload = serialize_snapshot_run(run)
-            logger.info(
-                'watchlist snapshot refresh completed market=%s status=%s '
-                'source_count=%s scored_count=%s error_count=%s started_at=%s '
-                'completed_at=%s elapsed_seconds=%s',
-                normalized_market, run.status, run.source_count, run.scored_count,
-                run.error_count, run.started_at.isoformat(),
-                run.completed_at.isoformat() if run.completed_at else None,
-                run.elapsed_seconds,
-            )
-            return payload
-        except Exception as exc:
-            db.rollback()
-            if run is not None and run.id is not None:
-                try:
-                    failed_run = db.get(WatchlistSnapshotRun, run.id)
-                    if failed_run is not None:
-                        failed_run.completed_at = self._now_utc()
-                        failed_run.elapsed_seconds = round(
-                            time.monotonic() - started_monotonic, 3
-                        )
-                        failed_run.status = 'failed'
-                        failed_run.error_count = max(1, int(failed_run.error_count or 0))
-                        db.commit()
-                        db.refresh(failed_run)
-                        return serialize_snapshot_run(failed_run)
-                except Exception:
-                    db.rollback()
-            logger.exception('watchlist snapshot refresh failed market=%s', normalized_market)
-            raise exc
-        finally:
-            self._refresh_lock.release()
+    def recovery_summary(self, db: Session):
+        job = self.latest_recovery(db)
+        if job is None:
+            return None
+        return {key: getattr(job, key) for key in ('root_run_id', 'latest_run_id', 'status',
+            'attempts', 'initial_read_calls', 'recovery_read_calls', 'reason_code')} | {
+                'deadline_at': _iso(job.deadline_at), 'next_retry_at': _iso(job.next_retry_at)}
 
     def latest_successful_run(self, db: Session, *, market: str = 'KR') -> WatchlistSnapshotRun | None:
         return (
@@ -240,46 +176,72 @@ class WatchlistSnapshotService:
             'quant_sell_score': 0.0,
             'quant_reason': 'insufficient data',
         }
-        had_error = False
+        from app.services.watchlist_snapshot_policy import safe_snapshot_error, sanitize_snapshot_error
+        errors = []
         scored = False
         name = source['name']
+        stage = 'exception'
         try:
             raw = market_data.snapshot(symbol, daily_limit=SNAPSHOT_DAILY_BAR_LIMIT)
             captured_at = _parse_datetime(raw.get('captured_at'), captured_at)
-            quote = raw.get('quote') if isinstance(raw, dict) else None
+            quote = raw.get('quote')
             if isinstance(quote, dict):
                 current_price = _finite(quote.get('current_price'))
                 name = str(quote.get('name') or '').strip() or name
-            had_error = bool(raw.get('quote_error') or raw.get('daily_error'))
+            for read_stage in ('quote', 'daily'):
+                error = raw.get(read_stage + '_error')
+                if error:
+                    # Prefer structured classification made before an exception
+                    # became text. Never persist raw exception messages.
+                    details = raw.get(read_stage + '_error_details')
+                    errors.append(sanitize_snapshot_error(details, stage=read_stage) if isinstance(details, dict) else
+                                  safe_snapshot_error(error, stage=read_stage))
+            stage = 'indicator'
             indicator_result = self.indicator_service.calculate(
-                list(raw.get('daily_bars') or []),
-                current_price=current_price,
-            )
-            indicators = dict(
-                indicator_result.get('indicator_payload') or EMPTY_TECHNICAL_INDICATORS
-            )
+                list(raw.get('daily_bars') or []), current_price=current_price)
+            indicators = dict(indicator_result.get('indicator_payload') or EMPTY_TECHNICAL_INDICATORS)
             if current_price is None:
                 current_price = _finite(indicators.get('price'))
-            if indicator_payload_is_quant_ready(indicators):
+            if indicator_payload_is_quant_ready(indicators) and current_price is not None and current_price > 0:
+                stage = 'exception'
                 quant = self.quant_signal_service.score(indicators, gate_level=gate_level)
                 scored = True
             else:
-                had_error = True
-        except Exception:
-            had_error = True
+                indicator_error = safe_snapshot_error(ValueError('invalid indicators'), stage='indicator')
+                if errors:
+                    # Record the missing indicator input too. A failed READ
+                    # does not turn a temporary outage into a permanent error.
+                    indicator_error.update(reason_code='indicator_input_unavailable',
+                                           retryable=all(error['retryable'] for error in errors))
+                errors.append(indicator_error)
+        except Exception as exc:
+            errors.append(safe_snapshot_error(exc, stage=stage))
 
+        try:
+            buy_score = _finite(quant.get('quant_buy_score'))
+            sell_score = _finite(quant.get('quant_sell_score'))
+            if buy_score is None or sell_score is None:
+                raise ValueError('invalid quant result')
+            indicators_json = json.dumps(indicators, ensure_ascii=False, sort_keys=True, allow_nan=False)
+            quant_reason = str(quant.get('quant_reason') or 'insufficient data')
+        except Exception as exc:
+            errors.append(safe_snapshot_error(exc, stage=stage))
+            scored = False
+            buy_score = sell_score = 0.0
+            indicators_json, quant_reason = '{}', 'insufficient data'
         item = {
             'symbol': symbol,
             'name': name,
             'market': source['market'],
             'current_price': current_price,
-            'quant_buy_score': round(float(quant.get('quant_buy_score') or 0.0), 2),
-            'quant_sell_score': round(float(quant.get('quant_sell_score') or 0.0), 2),
-            'indicators_json': json.dumps(indicators, ensure_ascii=False, sort_keys=True),
-            'quant_reason': str(quant.get('quant_reason') or 'insufficient data'),
+            'quant_buy_score': round(buy_score, 2),
+            'quant_sell_score': round(sell_score, 2),
+            'indicators_json': indicators_json,
+            'quant_reason': quant_reason,
             'captured_at': captured_at,
+            'errors': errors,
         }
-        return item, scored, had_error
+        return item, scored, bool(errors)
 
     def _default_client_factory(self, db: Session) -> KisClient:
         settings = get_settings()

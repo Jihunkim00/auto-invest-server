@@ -222,11 +222,13 @@ watchlist_snapshot_scheduler = WatchlistSnapshotScheduler(watchlist_snapshot_ser
 
 @router.get('/watchlist/snapshot/status')
 def get_watchlist_snapshot_status(db: Session = Depends(get_db)):
-    return watchlist_snapshot_selection_service.status(
+    result = watchlist_snapshot_selection_service.status(
         db,
         market='KR',
         refresh_running=WatchlistSnapshotService.is_refresh_running(),
     )
+    result['recovery'] = watchlist_snapshot_service.recovery_summary(db)
+    return result
 
 
 @router.get('/watchlist/snapshot/latest')
@@ -241,11 +243,16 @@ def refresh_watchlist_snapshot(db: Session = Depends(get_db)):
     except Exception as exc:
         raise HTTPException(status_code=502, detail={
             'error': 'watchlist_snapshot_refresh_failed',
-            'message': str(exc) or exc.__class__.__name__,
+            'message': 'Snapshot refresh is unavailable.',
         }) from exc
     if result.get('status') == 'already_running':
         raise HTTPException(status_code=409, detail=result)
     return result
+
+
+@router.get('/watchlist/snapshot/{run_id}/errors')
+def get_watchlist_snapshot_errors(run_id: int, db: Session = Depends(get_db)):
+    return {'snapshot_id': run_id, 'errors': watchlist_snapshot_service.error_details(db, run_id)}
 
 
 @router.get('/watchlist/snapshot/select')

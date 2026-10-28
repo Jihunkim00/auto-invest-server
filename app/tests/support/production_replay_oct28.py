@@ -321,6 +321,10 @@ class Replay:
         self.evidence, self.clock = evidence, Clock()
         self.engine = create_engine(
             f'sqlite:///{Path(path).as_posix()}', connect_args={'check_same_thread': False}, future=True)
+        # Additive PR141 tables only in this isolated production backup.
+        # Never run schema initialization against the original DB.
+        from app.db.database import Base
+        Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, autocommit=False, autoflush=False, future=True)
         @event.listens_for(self.sessions, 'before_flush')
         def virtual_timestamps(db, *_):
