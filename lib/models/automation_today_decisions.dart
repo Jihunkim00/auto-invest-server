@@ -119,6 +119,10 @@ class AutomationTodayDecisionSlot {
     this.failureStage,
     this.httpStatus,
     this.finalFailureReason,
+    this.aiDecision,
+    this.orderStatus = 'NOT SUBMITTED',
+    this.fillStatus,
+    this.orderBlockReason,
   });
 
   final String schedulerSlot;
@@ -162,6 +166,10 @@ class AutomationTodayDecisionSlot {
   final String? failureStage;
   final int? httpStatus;
   final String? finalFailureReason;
+  final String? aiDecision;
+  final String orderStatus;
+  final String? fillStatus;
+  final String? orderBlockReason;
 
   List<Candidate> get auditCandidates =>
       scoreGateCandidates.isNotEmpty ? scoreGateCandidates : analysisCandidates;
@@ -209,6 +217,10 @@ class AutomationTodayDecisionSlot {
       }
     }
     return AutomationTodayDecisionSlot(
+      aiDecision: _nullableString(json['ai_decision']),
+      orderStatus: _nullableString(json['order_status']) ?? 'NOT SUBMITTED',
+      fillStatus: _nullableString(json['fill_status']),
+      orderBlockReason: _nullableString(json['order_block_reason']),
       analysisCandidates: analyses,
       gptBuyScore: _double(json['gpt_buy_score']),
       gptAnalysisStatus: _nullableString(json['gpt_analysis_status']),

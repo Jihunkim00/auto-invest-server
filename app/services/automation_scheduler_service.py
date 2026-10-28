@@ -1615,7 +1615,8 @@ class AutomationSchedulerService(SchedulerService):
             profile_buy_blocked = profile_buy.get("status") == "blocked"
             if mode == "live":
                 canonical_result = (
-                    "blocked" if profile_buy_blocked else "LIVE_READY"
+                    "blocked" if profile_buy_blocked else
+                    "SYNC_REQUIRED" if profile_buy.get('status') == 'sync_required' else "LIVE_READY"
                 )
                 canonical_reason = (
                     profile_buy.get("reason")

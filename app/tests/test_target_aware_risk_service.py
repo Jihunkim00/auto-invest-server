@@ -269,16 +269,20 @@ def test_daily_loss_limit_still_blocks_different_symbol(db_session):
     assert result["symbol_consecutive_losses"] == 0
     assert "symbol_consecutive_loss_size_reduced" not in result["risk_flags"]
 
-def test_daily_trade_limit_blocks_new_entries(db_session):
+@pytest.mark.parametrize('status, reason, actual, unresolved', [
+    ('SUBMITTED', 'unresolved_entry_limit_hit', 0, 1),
+    ('FILLED', 'daily_trade_limit_hit', 1, 0),
+])
+def test_daily_trade_limit_blocks_new_entries(db_session, status, reason, actual, unresolved):
     db_session.add(
         OrderLog(
             broker="kis",
             market="KR",
-            symbol="005930",
+            symbol="000660",
             side="buy",
             order_type="market",
             qty=1,
-            internal_status="SUBMITTED",
+            internal_status=status,
             created_at=datetime.now(UTC),
         )
     )
@@ -287,7 +291,11 @@ def test_daily_trade_limit_blocks_new_entries(db_session):
     result = _service().evaluate_entry(db_session, _request())
 
     assert result["approved"] is False
-    assert result["block_reason"] == "daily_trade_limit_hit"
+    assert result["block_reason"] == reason
+    state = _service().budget_service.calculate(db_session, provider='kis', market='KR')
+    assert state['trades_used_today'] == actual
+    assert state['unresolved_entry_count'] == unresolved
+    assert state['trades_remaining_today'] == 0
 
 
 def test_max_positions_blocks_new_entries(db_session):

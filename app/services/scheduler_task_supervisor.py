@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+ACCOUNT_SLOT_BUY_WINDOW_SECONDS = 600
+ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS = 720
 _buy_guard = ContextVar('scheduler_buy_guard', default=None)
 
 
@@ -33,12 +35,18 @@ def check_scheduler_task_active():
 
 
 def check_scheduler_buy_allowed():
+    check_scheduler_task_active()
     guard = _buy_guard.get()
     expired_by_clock = bool(guard and guard.get('buy_expires_at') and
                             guard['now_provider']() >= guard['buy_expires_at'])
     if guard is not None and (guard['cancel'].is_set() or expired_by_clock or
                               time.monotonic() >= guard.get('buy_deadline', guard['deadline'])):
         raise SchedulerTaskExpired('scheduler_task_expired_before_buy')
+
+
+def scheduler_now():
+    task = _buy_guard.get()
+    return task['now_provider']() if task is not None else None
 
 
 def check_scheduler_watchlist_ready(db, now):
@@ -78,16 +86,18 @@ class SchedulerTaskSupervisor:
         self.last_progress_at = None
         self.accepting = True
 
-    def launch(self, lane, callback, *, timeout=300, critical=False, buy_timeout=None):
+    def launch(self, lane, callback, *, timeout=300, critical=False, buy_timeout=None, buy_expires_at=None):
         with self.lock:
             if not self.accepting or lane in self.tasks or len(self.tasks) >= self.max_tasks:
                 return False
             task = {'lane': lane, 'started_at': self.now(), 'deadline': time.monotonic() + timeout,
                     'timeout': timeout, 'cancel': threading.Event(), 'critical': critical,
                     'now_provider': self.now}
+            if buy_expires_at is not None:
+                buy_timeout = max(0, (buy_expires_at - task['started_at']).total_seconds())
             if buy_timeout is not None:
                 task['buy_deadline'] = time.monotonic() + buy_timeout
-                task['buy_expires_at'] = task['started_at'] + timedelta(seconds=buy_timeout)
+                task['buy_expires_at'] = buy_expires_at or task['started_at'] + timedelta(seconds=buy_timeout)
                 task['now_provider'] = self.now
             self.tasks[lane] = task
 

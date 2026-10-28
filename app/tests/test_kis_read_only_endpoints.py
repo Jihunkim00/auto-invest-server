@@ -446,6 +446,9 @@ def test_kis_preview_uses_normalized_price_not_raw_quote_fields(
 ):
     _add_access_token(db_session)
     monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.list_positions", lambda self: [])
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.get_domestic_daily_bars", lambda self, *args, **kwargs: [])
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.get_domestic_intraday_bars", lambda self, *args, **kwargs: [])
 
     def fake_price(self, symbol):
         return {

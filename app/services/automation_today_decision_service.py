@@ -11,12 +11,15 @@ from sqlalchemy.orm import Session
 from app.core.constants import A_TOP5_GPT_MIN_BUY_SCORE
 from app.db.models import (
     AutomationProfileAiCandidateResult,
+    AutomationProfileBuyReservation,
     AutomationProfileWatchlistItem,
     AutomationProfileWatchlistSnapshot,
     SignalLog,
+    OrderLog,
     TradeRunLog,
 )
 from app.services.automation_profile_service import AutomationProfileService
+from app.services.kis_daily_entry_accounting import simulated_order
 
 
 KST = ZoneInfo('Asia/Seoul')
@@ -236,6 +239,8 @@ class AutomationTodayDecisionService:
             'profile_name': profile.get('custom_name') or profile.get('display_name'),
             'owner_user_id': owner,
             **pipeline,
+            **self._order_state(db, profile=profile, slot=slot,
+                                local_date=local_date, admin_user_id=admin_user_id, run=run),
             'status': (
                 'analysis_pending'
                 if _slot_future(slot, local_date, now, schedule)
@@ -385,6 +390,7 @@ class AutomationTodayDecisionService:
         return {
             **base,
             'status': 'result',
+            'ai_decision': 'BUY APPROVED' if str(action or '').lower() in {'buy', 'would_buy'} else str(action or 'hold').upper(),
             'signal_status': signal.signal_status if signal is not None else run.result,
             'run_id': run.id,
             'run_key': run.run_key,
@@ -424,6 +430,62 @@ class AutomationTodayDecisionService:
             'ai_rank': snapshot_item.ai_rank,
             'profile_snapshot_id': snapshot_item.snapshot_id,
         }
+
+    @staticmethod
+    def _order_state(db, *, profile, slot, local_date, admin_user_id, run):
+        empty = {'order_id': None, 'order_status': 'NOT SUBMITTED',
+                 'fill_status': None, 'order_block_reason': None}
+        owner = _int_or_none(profile.get('owner_user_id'))
+        query = db.query(OrderLog).filter(OrderLog.broker == 'kis', OrderLog.side == 'buy')
+        if admin_user_id is not None:
+            query = query.filter(or_(OrderLog.owner_user_id.is_(None),
+                                     OrderLog.owner_user_id == int(admin_user_id)))
+        else:
+            query = query.filter(OrderLog.owner_user_id == owner)
+        reservations = db.query(AutomationProfileBuyReservation).filter_by(
+            profile_key=profile.get('profile_key'), trade_date_kst=local_date.isoformat(),
+            scheduler_slot_kst=slot,
+        ).all()
+        reserved_ids = {row.order_id for row in reservations}
+        run_response = _json(run.response_payload) if run is not None else {}
+        linked_id = (run.order_id or _int_or_none(run_response.get('order_id'))
+                     or _int_or_none((run_response.get('profile_buy') or {}).get('order_id'))) if run is not None else None
+        for order in query.order_by(OrderLog.id.desc()).all():
+            if str(order.market or 'KR').upper() != 'KR':
+                continue
+            request = _json(order.request_payload)
+            key = order.profile_key or request.get('automation_profile_key') or request.get('profile_key')
+            request_profile_id = order.profile_id or _int_or_none((request.get('sizing') or {}).get('profile_id'))
+            if key and key != profile.get('profile_key'):
+                continue
+            if request_profile_id and request_profile_id != profile.get('id'):
+                continue
+            event = order.submitted_at or order.created_at
+            by_slot = ((key == profile.get('profile_key') or request_profile_id == profile.get('id'))
+                       and request.get('scheduler_slot') == slot and event is not None
+                       and _aware_utc(event).astimezone(KST).date() == local_date)
+            if order.id not in reserved_ids and order.id != linked_id and not by_slot:
+                continue
+            status = str(order.internal_status or '').upper()
+            response = _json(order.response_payload)
+            fill = float(order.filled_qty or 0)
+            display, fill_status = 'SYNC REQUIRED', None
+            if simulated_order(order):
+                display = 'SIMULATED'
+            elif status == 'FILLED':
+                display, fill_status = 'FILLED', 'FILLED'
+            elif fill > 0:
+                display, fill_status = 'PARTIALLY FILLED', status
+            elif status in {'UNKNOWN_STALE', 'SYNC_FAILED'}:
+                display = 'SYNC REQUIRED'
+            elif order.broker_order_id or order.kis_odno:
+                display, fill_status = 'BROKER SUBMITTED', status
+            elif status == 'REJECTED_BY_SAFETY_GATE' or response.get('broker_submit_called') is False:
+                display = 'NOT SUBMITTED'
+            return {'order_id': order.id, 'order_status': display,
+                    'fill_status': fill_status, 'order_block_reason': order.error_message,
+                    'order_internal_status': status}
+        return empty
 
     @staticmethod
     def _pipeline_for_slot(

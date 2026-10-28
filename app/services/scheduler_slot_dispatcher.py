@@ -8,7 +8,10 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import AutomationSchedulerSlot
-from app.services.scheduler_task_supervisor import SchedulerTaskExpired
+from app.services.scheduler_task_supervisor import (
+    ACCOUNT_SLOT_BUY_WINDOW_SECONDS, ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS,
+    SchedulerTaskExpired,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,7 @@ class SchedulerSlotDispatcher:
             ).values(status='missed', reason='slot_window_elapsed_no_catchup', finished_at=current))
             db.execute(update(AutomationSchedulerSlot).where(
                 AutomationSchedulerSlot.status.in_(['running', 'retry_pending']),
-                AutomationSchedulerSlot.started_at <= current - timedelta(seconds=300),
+                AutomationSchedulerSlot.started_at <= current - timedelta(seconds=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS),
             ).values(status='failed', reason='scheduler_task_timeout', finished_at=current))
             db.commit()
 
@@ -59,7 +62,7 @@ class SchedulerSlotDispatcher:
                         db.rollback()
                         row = db.query(AutomationSchedulerSlot).filter_by(slot_key=key).one()
                 row_id = row.id
-                if row.status in {'running', 'retry_pending'} and row.started_at and current - row.started_at >= timedelta(seconds=300):
+                if row.status in {'running', 'retry_pending'} and row.started_at and current - row.started_at >= timedelta(seconds=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS):
                     self._finish(row_id, 'failed', 'scheduler_task_timeout', now, expected=row.status)
                     continue
                 if row.status != 'pending' or current < nominal:
@@ -82,7 +85,7 @@ class SchedulerSlotDispatcher:
                     return
                 try:
                     result = callback(slot, started)
-                    if self.now() - started >= timedelta(seconds=300):
+                    if self.now() - started >= timedelta(seconds=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS):
                         raise SchedulerTaskExpired('scheduler_task_timeout')
                     status, reason = self._outcome(result)
                     self._finish(row_id, status, reason, self.now(), result=result)
@@ -91,8 +94,9 @@ class SchedulerSlotDispatcher:
                                  else f'scheduler_slot_failed:{type(exc).__name__}', self.now())
                     raise
 
-            if not self.supervisor.launch(f'account-{account}', execute, timeout=300, critical=True,
-                buy_timeout=max(0, (scheduled + timedelta(minutes=1) - self.now()).total_seconds())):
+            if not self.supervisor.launch(f'account-{account}', execute, timeout=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS, critical=True,
+                buy_timeout=max(0, (scheduled + timedelta(seconds=ACCOUNT_SLOT_BUY_WINDOW_SECONDS) - self.now()).total_seconds()),
+                buy_expires_at=scheduled + timedelta(seconds=ACCOUNT_SLOT_BUY_WINDOW_SECONDS)):
                 self._finish(row_id, 'blocked', 'account_worker_busy_or_capacity_reached', now)
 
     def _finish(self, row_id, status, reason, now, *, result=None, expected='running'):

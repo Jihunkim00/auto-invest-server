@@ -73,6 +73,37 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 @pytest.fixture(autouse=True)
+def _forbid_external_kis_transport(monkeypatch):
+    """Mocks remain usable, but a forgotten mock cannot reach real KIS HTTP."""
+    import httpx
+    import requests
+    from urllib.parse import urlparse
+
+    def verify(url):
+        hostname = urlparse(str(url)).hostname or ''
+        if hostname == 'koreainvestment.com' or hostname.endswith('.koreainvestment.com'):
+            pytest.fail('External KIS HTTP is forbidden; use FakeBroker/FakeKisClient or mock transport')
+
+    requests_send = requests.adapters.HTTPAdapter.send
+    def guarded_requests(self, request, *args, **kwargs):
+        verify(request.url)
+        return requests_send(self, request, *args, **kwargs)
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, 'send', guarded_requests)
+
+    httpx_send = httpx.HTTPTransport.handle_request
+    def guarded_httpx(self, request):
+        verify(request.url)
+        return httpx_send(self, request)
+    monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', guarded_httpx)
+
+    httpx_async_send = httpx.AsyncHTTPTransport.handle_async_request
+    async def guarded_async_httpx(self, request):
+        verify(request.url)
+        return await httpx_async_send(self, request)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, 'handle_async_request', guarded_async_httpx)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_file_backed_test_database():
     _assert_safe_test_database()
     from app.services.market_data_snapshot_service import MarketDataSnapshotService

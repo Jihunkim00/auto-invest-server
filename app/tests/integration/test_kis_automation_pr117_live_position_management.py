@@ -567,7 +567,7 @@ def _persist_buy_today(db_session, *, status=InternalOrderStatus.FILLED.value):
         InternalOrderStatus.SYNC_FAILED.value,
     ],
 )
-def test_persisted_kis_buy_statuses_count_as_today_new_entry(
+def test_persisted_kis_buy_statuses_reserve_today_entry_capacity(
     db_session,
     monkeypatch,
     status,
@@ -578,7 +578,9 @@ def test_persisted_kis_buy_statuses_count_as_today_new_entry(
     result = harness.profile_buy.readiness(db_session, now=UTC_NOW)
 
     assert result['max_new_entries_per_day'] == 1
-    assert result['new_entries_used'] == 1
+    confirmed = int(status == InternalOrderStatus.FILLED.value)
+    assert result['new_entries_used'] == confirmed
+    assert result['unresolved_entry_count'] == 1 - confirmed
     assert result['new_entries_remaining'] == 0
 
 

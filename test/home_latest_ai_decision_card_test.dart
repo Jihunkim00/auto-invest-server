@@ -11,6 +11,59 @@ import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 import 'package:auto_invest_dashboard/models/automation_today_decisions.dart';
 
 void main() {
+  for (final orderStatus in [
+    'NOT SUBMITTED',
+    'BROKER SUBMITTED',
+    'FILLED',
+    'BLOCKED'
+  ]) {
+    testWidgets('AI approval is separate from $orderStatus', (tester) async {
+      final notSubmitted =
+          orderStatus == 'NOT SUBMITTED' || orderStatus == 'BLOCKED';
+      final controller = DashboardController(ApiClient(), autoload: false)
+        ..todayAiDecisionsLoaded = true
+        ..todayAiDecisions = AutomationTodayDecisions.fromJson({
+          'trade_date_kst': '2026-10-28',
+          'profile_id': 1,
+          'slots': [
+            {
+              'scheduler_slot': '11:20',
+              'status': orderStatus == 'BLOCKED' ? 'blocked' : 'result',
+              'symbol': '036460',
+              'action': 'buy',
+              'signal_status': 'LIVE_READY',
+              'approved_by_risk': true,
+              'ai_decision': 'BUY APPROVED',
+              'final_buy_score': 67.07,
+              if (!notSubmitted) 'order_status': orderStatus,
+              if (orderStatus == 'BROKER SUBMITTED') 'fill_status': 'PENDING',
+              if (notSubmitted)
+                'order_block_reason': 'scheduler_task_expired_before_buy',
+            },
+          ],
+        });
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: HomeLatestAiDecisionCard(controller: controller),
+          ),
+        ),
+      ));
+      expect(find.textContaining('BUY APPROVED'), findsOneWidget);
+      expect(find.textContaining(notSubmitted ? 'NOT SUBMITTED' : orderStatus),
+          findsOneWidget);
+      if (orderStatus == 'BROKER SUBMITTED') {
+        expect(find.textContaining('PENDING'), findsOneWidget);
+      }
+      if (notSubmitted) {
+        expect(find.textContaining('scheduler_task_expired_before_buy'),
+            findsOneWidget);
+        expect(find.textContaining('FILLED'), findsNothing);
+      }
+      controller.dispose();
+    });
+  }
+
   testWidgets(
       'position recovery slots display retry and blocked without missing analysis',
       (tester) async {
@@ -327,7 +380,8 @@ void main() {
     expect(find.textContaining('09:30'), findsOneWidget);
     expect(
         find.byKey(const ValueKey('home-ai-slot-card-09:30')), findsOneWidget);
-    expect(find.textContaining('HOLD'), findsOneWidget);
+    expect(find.textContaining('09:30 · HOLD'), findsOneWidget);
+    expect(find.text('AI 판단: HOLD'), findsOneWidget);
     expect(find.text('정상 분석 완료'), findsOneWidget);
     expect(find.text('C 기준 정량 통과 후보 없음 · GPT 분석 미실행'), findsOneWidget);
     expect(find.text('분석 결과 없음'), findsNothing);

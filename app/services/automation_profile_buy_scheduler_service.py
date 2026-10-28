@@ -32,6 +32,8 @@ from app.services.kis_position_lifecycle_service import CLOSED, CLOSING, OPEN, K
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
+from app.services.kis_daily_entry_accounting import daily_entry_counts
+from app.services.scheduler_task_supervisor import SchedulerTaskExpired
 from app.services.profile_universe_service import (
     candidate_price,
     profile_price_exclusion_reason,
@@ -407,11 +409,12 @@ class AutomationProfileBuySchedulerService:
         )
         if (
             trusted_scheduler_authority
-            and entry_accounting['new_entries_used']
+            and entry_accounting['new_entries_used'] + entry_accounting['unresolved_entry_count']
             >= entry_accounting['max_new_entries_per_day']
         ):
             return self._blocked(
-                'daily_new_entry_limit_reached',
+                ('daily_new_entry_limit_reached' if entry_accounting['new_entries_used']
+                 >= entry_accounting['max_new_entries_per_day'] else 'unresolved_entry_limit_hit'),
                 profile=profile,
                 live_order_gate=gate,
                 **entry_accounting,
@@ -569,25 +572,41 @@ class AutomationProfileBuySchedulerService:
         request_payload['reservation_id'] = reservation.id
         order.request_payload = _json(request_payload)
         db.commit()
-        validation = self._validate(
-            db, symbol, int(plan['quantity']), profile, selected, 'buy', selection_mode
-        )
-        if validation.get('validated_for_submission') is not True:
-            return self._validation_block(db, reservation, order, validation)
-        execution = self.execution_core.submit_market_buy(
-            db,
-            order=order,
-            symbol=symbol,
-            qty=int(plan['quantity']),
-            expected_price=plan['price'],
-            max_positions=1,
-            max_order_notional_krw=plan['approved_notional_krw'],
-            min_price_krw=(settings.get('universe') or {}).get('min_price_krw'),
-            max_price_krw=(settings.get('universe') or {}).get('max_price_krw'),
-            now=now_utc,
-        )
+        try:
+            validation = self._validate(
+                db, symbol, int(plan['quantity']), profile, selected, 'buy', selection_mode
+            )
+            if validation.get('validated_for_submission') is not True:
+                blocked = self._validation_block(db, reservation, order, validation)
+                self._record_run(db, blocked, slot, now_utc)
+                return blocked
+            execution = self.execution_core.submit_market_buy(
+                db,
+                order=order,
+                symbol=symbol,
+                qty=int(plan['quantity']),
+                expected_price=plan['price'],
+                max_positions=1,
+                max_order_notional_krw=plan['approved_notional_krw'],
+                min_price_krw=(settings.get('universe') or {}).get('min_price_krw'),
+                max_price_krw=(settings.get('universe') or {}).get('max_price_krw'),
+                now=now_utc,
+            )
+        except Exception as exc:
+            if order.internal_status == InternalOrderStatus.REQUESTED.value:
+                execution = self.execution_core._blocked(db, order, {
+                    'allowed': False,
+                    'reason': str(exc) if isinstance(exc, SchedulerTaskExpired) else 'validation_failed',
+                    'error_type': type(exc).__name__,
+                })
+            else:
+                # Acknowledged or dispatch-started orders retain their state.
+                reservation.status = 'sync_required'
+                reservation.block_reason = 'execution_sync_required'
+                db.commit()
+                raise
         if execution.get('submitted') is not True:
-            reservation.status = 'blocked'
+            reservation.status = 'sync_required' if execution.get('status') == 'sync_required' else 'blocked'
             reservation.block_reason = execution.get('reason') or 'execution_core_gate_blocked'
             db.commit()
             blocked = self._blocked(
@@ -597,9 +616,11 @@ class AutomationProfileBuySchedulerService:
                 order_id=order.id,
                 reservation_id=reservation.id,
                 internal_status=order.internal_status,
+                status=reservation.status,
                 guard=execution.get('guard'),
                 validation_called=True,
                 broker_submit_called=bool(execution.get('broker_submit_called')),
+                real_order_submitted=bool(execution.get('real_order_submitted')),
                 live_order_gate=gate,
                 **self._daily_new_entry_accounting(
                     db,
@@ -712,12 +733,14 @@ class AutomationProfileBuySchedulerService:
         )
 
     def _blocked(self, reason: str, *, profile: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        broker_called = bool(extra.pop('broker_submit_called', False))
         daily_fields = {
             key: extra.pop(key)
             for key in (
                 'max_new_entries_per_day',
                 'new_entries_used',
                 'new_entries_remaining',
+                'unresolved_entry_count',
                 'entry_trade_date_kst',
             )
             if key in extra
@@ -729,8 +752,8 @@ class AutomationProfileBuySchedulerService:
             'profile_key': profile.get('profile_key'),
             'required_entry_score': _threshold(profile),
             'validation_called': bool(extra.pop('validation_called', False)),
-            'broker_submit_called': bool(extra.pop('broker_submit_called', False)),
-            'broker_buy_call_count': 0,
+            'broker_submit_called': broker_called,
+            'broker_buy_call_count': int(broker_called),
             'real_external_kis_submit_count': 0,
             'safety': _safety(read_only=False),
             **daily_fields,
@@ -754,10 +777,14 @@ class AutomationProfileBuySchedulerService:
         used = _persisted_daily_new_entry_count(
             db, now=now, owner_user_id=getattr(self.client, 'user_id', None),
         )
+        _, unresolved = daily_entry_counts(
+            db, now=now, owner_user_id=getattr(self.client, 'user_id', None),
+        )
         return {
             'max_new_entries_per_day': maximum,
             'new_entries_used': used,
-            'new_entries_remaining': max(0, maximum - used),
+            'unresolved_entry_count': unresolved,
+            'new_entries_remaining': max(0, maximum - used - unresolved),
             'entry_trade_date_kst': now.astimezone(KST).date().isoformat(),
         }
 
@@ -906,6 +933,8 @@ class AutomationProfileBuySchedulerService:
                 'reservation_key': key,
                 'automation_profile': True,
                 'automation_profile_key': profile.get('profile_key'),
+                'broker_submit_called': False,
+                'real_order_submitted': False,
                 'final_buy_score': _score(candidate, 'final_buy_score', 'final_score', 'buy_score'),
                 'target_risk_result': target,
                 'estimated_price': plan['price'],
@@ -952,8 +981,7 @@ class AutomationProfileBuySchedulerService:
         reason = validation.get('primary_block_reason') or (validation.get('block_reasons') or ['validation_failed'])[0]
         reservation.status = 'blocked'
         reservation.block_reason = reason
-        order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
-        db.commit()
+        self.execution_core._blocked(db, order, {'allowed': False, 'reason': reason})
         return {
             'status': 'blocked',
             'action': 'hold',
@@ -961,8 +989,10 @@ class AutomationProfileBuySchedulerService:
             'selected_symbol': order.symbol,
             'order_id': order.id,
             'reservation_id': reservation.id,
+            'internal_status': order.internal_status,
             'validation_called': True,
             'broker_submit_called': False,
+            'real_order_submitted': False,
             'broker_buy_call_count': 0,
             'real_external_kis_submit_count': 0,
             'validation': validation,
@@ -1113,82 +1143,13 @@ def _profile_settings(profile: dict[str, Any]) -> dict[str, Any]:
     return profile.get('automation_settings') or profile.get('effective_settings') or {}
 
 
-_DAILY_ENTRY_IGNORED_STATUSES = {
-    InternalOrderStatus.CANCELED.value,
-    'CANCELLED',
-    InternalOrderStatus.DRY_RUN_SIMULATED.value,
-    InternalOrderStatus.REJECTED.value,
-    InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
-    InternalOrderStatus.FAILED.value,
-}
-
-
 def _persisted_daily_new_entry_count(
     db: Session,
     *,
     now: datetime,
     owner_user_id: int | None = None,
 ) -> int:
-    local_now = _utc(now).astimezone(KST)
-    day_start = datetime.combine(
-        local_now.date(),
-        datetime.min.time(),
-        tzinfo=KST,
-    ).astimezone(UTC)
-    day_end = day_start + timedelta(days=1)
-    seen_order_ids: set[int] = set()
-    count = 0
-
-    rows = (
-        db.query(OrderLog)
-        .filter(OrderLog.broker == PROVIDER)
-        .filter(OrderLog.owner_user_id == owner_user_id)
-        .all()
-    )
-    for row in rows:
-        seen_order_ids.add(int(row.id))
-        if str(row.side or '').strip().lower() != 'buy':
-            continue
-        row_market = str(row.market or MARKET).strip().upper()
-        if row_market != MARKET:
-            continue
-        event_at = row.submitted_at or row.created_at
-        if event_at is None:
-            continue
-        event_at = _utc(event_at)
-        if not day_start <= event_at < day_end:
-            continue
-        if str(row.internal_status or '').strip().upper() in _DAILY_ENTRY_IGNORED_STATUSES:
-            continue
-        count += 1
-
-    # The OrderLog is the primary source. TradeRunLog is a durable fallback
-    # for a successful canonical run whose order row was not available to the
-    # reader during restart recovery.
-    run_rows = (
-        db.query(TradeRunLog)
-        .filter(TradeRunLog.mode == MODE)
-        .filter(TradeRunLog.owner_user_id == owner_user_id)
-        .filter(TradeRunLog.order_id.isnot(None))
-        .all()
-    )
-    for row in run_rows:
-        if row.order_id is not None and int(row.order_id) in seen_order_ids:
-            continue
-        event_at = row.created_at
-        if event_at is None:
-            continue
-        event_at = _utc(event_at)
-        if not day_start <= event_at < day_end:
-            continue
-        if str(row.result or '').strip().lower() not in {
-            'filled',
-            'submitted',
-            'sync_required',
-        }:
-            continue
-        count += 1
-    return count
+    return daily_entry_counts(db, now=_utc(now), owner_user_id=owner_user_id)[0]
 
 
 def _threshold(profile: dict[str, Any]) -> float:

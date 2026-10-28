@@ -180,7 +180,7 @@ class AccountTradingLimitService:
                 OrderLog.broker == 'kis', OrderLog.market == 'KR', OrderLog.side == 'buy',
                 OrderLog.internal_status.in_([
                     'REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING',
-                    'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'FILLED',
+                    'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED', 'FILLED',
                 ]),
             ).all()
             for order in orders:

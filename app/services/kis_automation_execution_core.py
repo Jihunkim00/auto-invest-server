@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.scheduler_task_supervisor import check_scheduler_buy_allowed, check_scheduler_watchlist_ready
+from app.services.scheduler_task_supervisor import SchedulerTaskExpired, check_scheduler_buy_allowed, check_scheduler_watchlist_ready, scheduler_now
 
 import json
 import time
@@ -102,11 +102,12 @@ class KisAutomationExecutionCore:
             return sanitize_kis_payload(payload)
 
         except Exception as exc:
+            reason = str(exc) if isinstance(exc, SchedulerTaskExpired) else 'validation_failed'
             return {
                 "validated_for_submission": False,
                 "can_submit_later": False,
-                "block_reasons": ["validation_failed"],
-                "primary_block_reason": "validation_failed",
+                "block_reasons": [reason],
+                "primary_block_reason": reason,
                 "error": _error(exc),
             }
 
@@ -145,16 +146,29 @@ class KisAutomationExecutionCore:
         return int(status_code), sanitize_kis_payload(payload)
 
     def submit_market_buy(self, db: Session, **kwargs) -> dict[str, Any]:
-        check_scheduler_buy_allowed()
-        check_scheduler_watchlist_ready(db, self.now_provider())
         order = kwargs['order']
+        if order.internal_status != InternalOrderStatus.REQUESTED.value:
+            return {'status': 'sync_required', 'reason': 'order_already_attempted',
+                    'submitted': False, 'broker_submit_called': False,
+                    'real_order_submitted': False, 'order_id': order.id,
+                    'internal_status': order.internal_status}
         try:
+            check_scheduler_buy_allowed()
+            check_scheduler_watchlist_ready(db, self.now_provider())
+            if scheduler_now() is not None:
+                kwargs['now'] = scheduler_now()
             with AccountTradingLimitService().buy_execution_claim(
                 db, owner_user_id=order.owner_user_id,
             ):
                 return self._submit_market_buy_with_claim(db, **kwargs)
-        except AccountTradingLimitError as exc:
-            return self._blocked(db, order, {'allowed': False, 'reason': str(exc)})
+        except Exception as exc:
+            # The dispatch boundary below changes REQUESTED durably before
+            # calling the broker. Never reject an ambiguous/acknowledged POST.
+            if order.internal_status != InternalOrderStatus.REQUESTED.value:
+                raise
+            reason = str(exc) if isinstance(exc, (AccountTradingLimitError, SchedulerTaskExpired)) else 'pre_submit_safety_blocked'
+            return self._blocked(db, order, {'allowed': False, 'reason': reason,
+                                            'error': _error(exc)})
 
     def _submit_market_buy_with_claim(
         self,
@@ -243,6 +257,9 @@ class KisAutomationExecutionCore:
                 now=now,
                 guard=guard,
             )
+
+        if submitter is None and self.broker is None:
+            return self._blocked(db, order, {'allowed': False, 'reason': 'broker_unavailable'})
 
         return self._submit_market(
             db,
@@ -512,6 +529,7 @@ class KisAutomationExecutionCore:
         )
 
         order.error_message = reason
+        order.broker_status = order.broker_order_status = 'not_submitted'
 
         order.response_payload = _json(
             {
@@ -519,6 +537,8 @@ class KisAutomationExecutionCore:
                 "status": "blocked",
                 "reason": reason,
                 "order_id": order.id,
+                "broker_submit_called": False,
+                "real_order_submitted": False,
                 "source_metadata": _source_metadata(order),
                 "guard": guard,
             }
@@ -587,8 +607,38 @@ class KisAutomationExecutionCore:
             reason = account_buy_block_reason(db, owner_user_id=order.owner_user_id) or global_buy_block_reason(db)
             if reason:
                 return self._blocked(db, order, {'allowed': False, 'reason': reason})
+            reason = self._scheduler_entry_block_reason(db, order)
+            if reason:
+                return self._blocked(db, order, {'allowed': False, 'reason': reason})
             record_gate('SUBMIT_SAFETY', actual={'quantity': qty, 'authority': authority},
                         required='fresh possible order, watchlist, current slot and live authority')
+        if side == 'buy':
+            # A crash or transport timeout after this durable boundary is
+            # ambiguous and must be reconciled, never automatically retried.
+            order.internal_status = InternalOrderStatus.UNKNOWN_STALE.value
+            order.broker_status = order.broker_order_status = 'sync_required'
+            order.response_payload = _json({
+                'execution_core': 'kis_automation_execution_core',
+                'status': 'sync_required', 'reason': 'broker_submit_in_progress',
+                'broker_submit_called': True, 'real_order_submitted': False,
+                'guard': guard, 'source_metadata': _source_metadata(order),
+            })
+            db.commit()
+            try:
+                check_scheduler_buy_allowed()
+                check_scheduler_watchlist_ready(db, self.now_provider())
+                reason = (account_buy_block_reason(db, owner_user_id=order.owner_user_id)
+                          or global_buy_block_reason(db)
+                          or self._scheduler_entry_block_reason(db, order))
+                if self._execution_authority(db).get('automation_mode') != 'live':
+                    reason = 'automation_mode_not_live'
+                if time.monotonic() - guard.get('possible_order_checked_clock', 0) > self.POSSIBLE_ORDER_MAX_AGE_SECONDS:
+                    reason = 'possible_order_snapshot_stale'
+                if reason:
+                    return self._blocked(db, order, {'allowed': False, 'reason': reason})
+            except Exception as exc:
+                reason = str(exc) if isinstance(exc, SchedulerTaskExpired) else 'pre_submit_safety_blocked'
+                return self._blocked(db, order, {'allowed': False, 'reason': reason, 'error': _error(exc)})
         try:
             response = submitter()
             if side == 'buy':
@@ -609,6 +659,8 @@ class KisAutomationExecutionCore:
                     "execution_core": "kis_automation_execution_core",
                     "status": "sync_required",
                     "error": error,
+                    "broker_submit_called": True,
+                    "real_order_submitted": False,
                     "source_metadata": _source_metadata(order),
                     "guard": guard,
                 }
@@ -645,6 +697,8 @@ class KisAutomationExecutionCore:
                     "execution_core": "kis_automation_execution_core",
                     "status": "sync_required",
                     "reason": reason,
+                    "broker_submit_called": True,
+                    "real_order_submitted": False,
                     "source_metadata": _source_metadata(order),
                     "broker_response": response,
                     "guard": guard,
@@ -736,6 +790,42 @@ class KisAutomationExecutionCore:
             ),
             "guard": guard,
         }
+
+    def _scheduler_entry_block_reason(self, db, order):
+        current = scheduler_now()
+        if current is None:
+            return None
+        from zoneinfo import ZoneInfo
+        from app.services.market_session_service import MarketSessionService
+        session = MarketSessionService().get_session_status('KR', now=current)
+        if session.get('is_market_open') is not True:
+            return 'market_session_closed'
+        if session.get('is_entry_allowed_now') is not True:
+            return 'entry_window_closed'
+        payload = json.loads(order.request_payload or '{}')
+        key = order.profile_key or payload.get('automation_profile_key')
+        profile = db.query(StrategyProfile).filter_by(profile_key=key).populate_existing().first() if key else None
+        if profile is None:
+            return 'profile_status_not_active'
+        from app.services.automation_profile_service import AutomationProfileService
+        current_profile = AutomationProfileService().serialize(profile, now=current)
+        if current_profile['status'] != 'active':
+            return 'profile_status_not_active'
+        settings = current_profile['effective_settings']
+        cutoff = str((settings.get('entry') or {}).get('no_new_entry_after') or '14:00')
+        if current.astimezone(ZoneInfo('Asia/Seoul')).strftime('%H:%M') >= cutoff:
+            return 'entry_window_closed'
+        from app.services.kis_daily_entry_accounting import daily_entry_counts
+        filled, unresolved = daily_entry_counts(
+            db, now=current, owner_user_id=order.owner_user_id, exclude_order_id=order.id,
+        )
+        maximum = min(int(profile.max_trades_per_day or 0),
+                      max(1, int((settings.get('entry') or {}).get('max_new_entries_per_day') or 1)))
+        if filled >= maximum:
+            return 'daily_trade_limit_hit'
+        if filled + unresolved >= maximum:
+            return 'unresolved_entry_limit_hit'
+        return None
 
     @observe_gate('BROKER_PREFLIGHT', allowed_key='allowed')
     def _buy_jit_guard(

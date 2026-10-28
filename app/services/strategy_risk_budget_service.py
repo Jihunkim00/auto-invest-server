@@ -12,6 +12,7 @@ from app.services.compound_capital_service import CompoundCapitalService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_performance_service import StrategyPerformanceService
 from app.services.strategy_profile_service import StrategyProfileService
+from app.services.kis_daily_entry_accounting import daily_entry_counts
 
 
 PositionLoader = Callable[[Session, str, str], list[dict[str, Any]]]
@@ -127,6 +128,12 @@ class StrategyRiskBudgetService:
             market=normalized_market,
             owner_user_id=owner_user_id,
         )
+        unresolved_entries = 0
+        if normalized_provider == 'kis' and normalized_market == 'KR':
+            _, unresolved_entries = daily_entry_counts(
+                db, now=self.now_provider(), owner_user_id=owner_user_id,
+                exclude_order_id=exclude_order_id,
+            )
         max_trades = max(0, int(profile.get("max_trades_per_day") or 0))
         current_positions = self._position_count(positions)
         max_positions = max(0, int(profile.get("max_positions") or 0))
@@ -327,6 +334,8 @@ class StrategyRiskBudgetService:
                 "daily_trade_limit_hit",
                 f"오늘 거래 사용 횟수는 {trades_used}/{max_trades}회입니다.",
             )
+        elif trades_used + unresolved_entries >= max_trades:
+            block('unresolved_entry_limit_hit', 'Unresolved BUY orders reserve daily entry capacity.')
         if max_positions <= 0 or current_positions >= max_positions:
             block(
                 "max_positions_hit",
@@ -449,7 +458,8 @@ class StrategyRiskBudgetService:
             **unmatched_counts,
             "max_trades_per_day": max_trades,
             "trades_used_today": trades_used,
-            "trades_remaining_today": max(0, max_trades - trades_used),
+            "unresolved_entry_count": unresolved_entries,
+            "trades_remaining_today": max(0, max_trades - trades_used - unresolved_entries),
             "max_positions": max_positions,
             "current_positions_count": current_positions,
             "new_entries_allowed": block_reason is None,
@@ -593,6 +603,8 @@ class StrategyRiskBudgetService:
         market: str,
         owner_user_id: int | None = None,
     ) -> int:
+        if provider == 'kis' and market == 'KR':
+            return daily_entry_counts(db, now=self.now_provider(), owner_user_id=owner_user_id)[0]
         today = self.now_provider().astimezone(_KST).date()
         start = datetime.combine(today, time.min, tzinfo=_KST).astimezone(UTC)
         end = start + timedelta(days=1)

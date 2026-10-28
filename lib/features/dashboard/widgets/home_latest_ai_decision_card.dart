@@ -317,6 +317,26 @@ class _TodayDecisionSlot extends StatelessWidget {
             score,
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
+          if (slot.hasAnalysisResult ||
+              slot.orderBlockReason != null ||
+              slot.orderStatus != 'NOT SUBMITTED') ...[
+            const SizedBox(height: 3),
+            Text(
+              '${english ? 'AI decision' : 'AI 판단'}: ${slot.aiDecision ?? (slot.action ?? 'HOLD').toUpperCase()}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            Text(
+              '${english ? 'Order' : '주문 상태'}: ${slot.orderStatus}'
+              '${slot.fillStatus == null || slot.fillStatus == slot.orderStatus ? '' : ' · ${english ? 'Fill' : '체결 상태'}: ${slot.fillStatus}'}',
+              key: ValueKey('home-ai-order-status-${slot.schedulerSlot}'),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            if (slot.orderBlockReason != null)
+              Text(
+                '${english ? 'Order reason' : '주문 원인'}: ${slot.orderBlockReason}',
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+          ],
           if (reason.isNotEmpty) ...[
             const SizedBox(height: 3),
             Text(
