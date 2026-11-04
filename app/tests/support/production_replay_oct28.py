@@ -92,6 +92,18 @@ class Evidence:
         self.seed = Path(directory) / 'production-backup.db'
         backup(self.source, self.seed)
         with readonly(self.seed) as db:
+            # Mutable profile settings may have changed since October 28.
+            # The persisted slot ledger is the evidence for that day's actual
+            # schedule; do not borrow today's analysis_times for this replay.
+            start = at('00:00:00').astimezone(UTC).replace(tzinfo=None)
+            self.profile_slots = {}
+            for row in db.execute(
+                'SELECT profile_id,scheduled_at FROM automation_scheduler_slots '
+                'WHERE scheduled_at>=? AND scheduled_at<? AND profile_id IS NOT NULL',
+                (start.isoformat(' '), (start + timedelta(days=1)).isoformat(' ')),
+            ):
+                scheduled = datetime.fromisoformat(row['scheduled_at']).replace(tzinfo=UTC)
+                self.profile_slots.setdefault(row['profile_id'], set()).add(scheduled.astimezone(KST).strftime('%H:%M'))
             self.runs = {r['id']: parsed(r['response_payload']) for r in db.execute(
                 'SELECT id,response_payload FROM trade_run_logs WHERE id BETWEEN 260 AND 268')}
             self.ai = [dict(r) for r in db.execute(
@@ -124,6 +136,15 @@ class Evidence:
         backup(self.seed, target)
         cutoff = at('11:20:00').astimezone(UTC).replace(tzinfo=None).isoformat(' ')
         with sqlite3.connect(target) as db:
+            for profile_id, slots in self.profile_slots.items():
+                raw = db.execute('SELECT settings_json FROM strategy_profiles WHERE id=?', (profile_id,)).fetchone()
+                assert raw is not None, 'Recorded slot profile is unavailable'
+                settings = parsed(raw[0])
+                settings['entry']['analysis_times'] = sorted(slots)
+                # Only the disposable copy changes. Risk, sizing, session,
+                # cutoff, TP/SL and authority settings remain as recorded.
+                db.execute('UPDATE strategy_profiles SET settings_json=? WHERE id=?',
+                    (json.dumps(settings, ensure_ascii=False), profile_id))
             # Only the independent backup is edited. Retain pre-slot history
             # for real compound capital, loss and risk calculations.
             for table, column in (
@@ -137,6 +158,17 @@ class Evidence:
             db.execute('DELETE FROM automation_profile_watchlist_items WHERE snapshot_id NOT IN (SELECT id FROM automation_profile_watchlist_snapshots)')
             db.execute('DELETE FROM watchlist_snapshot_runs WHERE started_at>=?', (cutoff,))
             db.execute('DELETE FROM watchlist_snapshot_items WHERE run_id NOT IN (SELECT id FROM watchlist_snapshot_runs)')
+            # Rewinding parent runs must also rewind their recovery state.
+            # Otherwise future orphan errors can attach to reused run ids,
+            # consume retry budgets and exhaust a historical replay early.
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'watchlist_snapshot_errors' in tables:
+                db.execute('DELETE FROM watchlist_snapshot_errors WHERE run_id NOT IN (SELECT id FROM watchlist_snapshot_runs)')
+            if 'watchlist_snapshot_recoveries' in tables:
+                db.execute('DELETE FROM watchlist_snapshot_recoveries WHERE root_run_id NOT IN '
+                    '(SELECT id FROM watchlist_snapshot_runs) OR latest_run_id NOT IN (SELECT id FROM watchlist_snapshot_runs)')
+            if 'watchlist_snapshot_refresh_claims' in tables:
+                db.execute('DELETE FROM watchlist_snapshot_refresh_claims')
             db.execute('DELETE FROM user_auto_trading_slot_claims WHERE trading_date>=?', (DAY,))
             db.execute('DELETE FROM user_trading_risk_states WHERE trading_date>=?', (DAY,))
             db.execute('DELETE FROM account_buy_execution_claims')

@@ -120,7 +120,7 @@ class ReadOnlyKisTransport:
         return self.session.post(url, **kwargs)
 
 
-def read_history(client, transport, *, start_date, end_date, max_pages=20):
+def read_history(client, transport, *, start_date, end_date, max_pages=20, exchange='ALL', order_no=''):
     from app.services.user_broker_account_service import _require_kis_read_response
     cursor = ('', '')
     seen = set()
@@ -131,12 +131,15 @@ def read_history(client, transport, *, start_date, end_date, max_pages=20):
             raise ValueError('history_pagination_loop')
         seen.add(cursor)
         transport.continuation = 'N' if page else ''
-        response = client._send_get(HISTORY_PATH, tr_id=HISTORY_TR_ID, token=token, params={
+        params = {
             'CANO': client.credentials['account_no'], 'ACNT_PRDT_CD': client.credentials['account_product_code'],
             'INQR_STRT_DT': start_date, 'INQR_END_DT': end_date, 'SLL_BUY_DVSN_CD': '00',
-            'INQR_DVSN': '00', 'PDNO': '', 'CCLD_DVSN': '00', 'ORD_GNO_BRNO': '', 'ODNO': '',
+            'INQR_DVSN': '00', 'PDNO': '', 'CCLD_DVSN': '00', 'ORD_GNO_BRNO': '', 'ODNO': order_no,
             'INQR_DVSN_3': '00', 'INQR_DVSN_1': '', 'CTX_AREA_FK100': cursor[0],
-            'CTX_AREA_NK100': cursor[1], 'EXCG_ID_DVSN_CD': 'ALL'})
+            'CTX_AREA_NK100': cursor[1]}
+        if exchange is not None:
+            params['EXCG_ID_DVSN_CD'] = exchange
+        response = client._send_get(HISTORY_PATH, tr_id=HISTORY_TR_ID, token=token, params=params)
         payload = _require_kis_read_response(response)
         values = payload.get('output1')
         if not isinstance(values, list) or any(not isinstance(row, dict) for row in values):
@@ -150,7 +153,7 @@ def read_history(client, transport, *, start_date, end_date, max_pages=20):
     raise ValueError('history_incomplete')
 
 
-def fetch_broker_evidence(report, order, credential):
+def fetch_broker_evidence(report, order, credential, *, compare_default_exchange=False):
     from app.services.broker_credential_crypto_service import BrokerCredentialCryptoService
     from app.services.user_broker_account_service import UserKisReadOnlyClient, UserKisTokenManager
     transport = ReadOnlyKisTransport()
@@ -181,6 +184,23 @@ def fetch_broker_evidence(report, order, credential):
             'same_symbol_orders': [safe(row) for row in same_symbol],
             'buy_order_count': sum(str(row.get('sll_buy_dvsn_cd')) == '02' for row in rows),
             'absence_is_not_proof_of_never_submitted': True}
+        if compare_default_exchange:
+            default_rows, default_pages = read_history(client, transport, start_date=start,
+                end_date=end, exchange=None)
+            report['default_exchange_comparison'] = {
+                'exchange_parameter_omitted': True, 'complete': True, 'pages': default_pages,
+                'total_orders': len(default_rows), 'exact_match_count': sum(
+                    str(row.get('odno') or '').lstrip('0') == target for row in default_rows),
+                'all_exchanges_exact_match_count': len(exact)}
+            original_no = str(order.get('kis_odno') or order.get('broker_order_id') or '')
+            old_exact, _ = read_history(client, transport, start_date=start, end_date=start,
+                exchange=None, order_no=original_no)
+            new_exact = client.inquire_daily_order_executions(order_no=original_no,
+                start_date=datetime.strptime(start, '%Y%m%d').date(),
+                end_date=datetime.strptime(start, '%Y%m%d').date())
+            report['order_number_filter_comparison'] = {
+                'submitted_date': start, 'old_default_exact_count': len(old_exact),
+                'owner_sync_all_exchanges_exact_count': len(new_exact['orders'])}
         snapshot = client.get_snapshot()
         report['current_snapshot'] = {key: snapshot.get(key) for key in ('positions_reliable', 'open_orders_reliable')}
         report['current_snapshot'].update(positions_count=len(snapshot.get('positions') or []),
@@ -189,11 +209,15 @@ def fetch_broker_evidence(report, order, credential):
         now = datetime.now(timezone.utc)
         scope = {'owner_user_id': order['owner_user_id'], 'provider': 'kis', 'environment': 'live',
             'broker_account_id': f'user:{order["owner_user_id"]}:kis:KR', 'checked_at': now.isoformat()}
-        try:
-            report['reconciliation_proposal'] = propose_reconciliation(order,
-                history={**scope, 'complete': True, 'orders': rows}, snapshot={**snapshot, **scope}, now=now)
-        except ReconciliationBlocked as exc:
-            report['reconciliation_proposal'] = {'eligible': False, 'reason': str(exc)}
+        if order['side'] == 'buy':
+            report['reconciliation_proposal'] = {'eligible': False, 'reason': 'buy_requires_owner_scoped_sync',
+                'path': f'/users/me/trading/orders/{order["id"]}/sync', 'diagnostic_only': True}
+        else:
+            try:
+                report['reconciliation_proposal'] = propose_reconciliation(order,
+                    history={**scope, 'complete': True, 'orders': rows}, snapshot={**snapshot, **scope}, now=now)
+            except ReconciliationBlocked as exc:
+                report['reconciliation_proposal'] = {'eligible': False, 'reason': str(exc)}
     except Exception as exc:
         details = getattr(exc, 'details', {})
         report['broker_read_error'] = {'exception_type': type(exc).__name__, **{
@@ -213,13 +237,14 @@ def main():
     parser.add_argument('--user', required=True)
     parser.add_argument('--order-id', required=True, type=int)
     parser.add_argument('--with-history', action='store_true')
+    parser.add_argument('--compare-default-exchange', action='store_true')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     with open_readonly(args.database) as db:
         report, order, credential = local_evidence(db, order_id=args.order_id, username=args.user)
     if args.with_history:
-        fetch_broker_evidence(report, order, credential)
+        fetch_broker_evidence(report, order, credential, compare_default_exchange=args.compare_default_exchange)
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:
         args.output.write_text(rendered + '\n', encoding='utf-8')

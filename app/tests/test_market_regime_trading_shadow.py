@@ -420,7 +420,8 @@ def test_market_regime_admin_skip_logs_same_decision_context_without_execution(d
     scheduler = _canonical_scheduler_for_tick(db_session, monkeypatch, positions_loader=lambda db: [], events=events)
     RuntimeSettingService().update_settings(db_session, {"automation_profile_scheduler_enabled": False})
     result = scheduler._run_automation_tick("09:30", now)
-    assert isinstance(result, TradeRunLog)
+    assert result['result'] == 'skipped'
+    assert result['reason'] == 'automation_disabled'
     log = db_session.query(TradeRunLog).one()
     payload = json.loads(log.response_payload)
     assert payload["reason"] == "automation_disabled"

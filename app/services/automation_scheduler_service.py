@@ -1002,13 +1002,10 @@ class AutomationSchedulerService(SchedulerService):
                           now_provider=self.retry_now_provider)
         with capture_run(trace):
             original = self._run_automation_tick_observed(slot_name, now, slot_claimed, **kwargs)
-            # Legacy early skips return their canonical audit row. Preserve
-            # that API and enrich the existing row instead of duplicating it.
-            existing_run = original if isinstance(original, TradeRunLog) else None
-            result = original if isinstance(original, dict) else {
-                'result': getattr(original, 'result', 'failed'),
-                'reason': getattr(original, 'reason', 'scheduler_result_invalid'),
-            }
+            # The implementation closes its session before returning. Only
+            # plain values (including the canonical skip audit id) cross it.
+            result = original
+            existing_run_id = result.get('scheduler_skip_run_id')
             if str(result.get('result') or result.get('status')).lower() in {'blocked', 'failed', 'hold', 'skipped'}:
                 result.setdefault('submission_eligible', False)
                 result.setdefault('real_order_submitted', False)
@@ -1024,8 +1021,8 @@ class AutomationSchedulerService(SchedulerService):
         result['run_diagnostics'] = trace
         # Dedicated audit also covers early HOLD/BLOCK paths with no analysis run.
         with SessionLocal() as db:
-            if existing_run is not None:
-                row = db.get(TradeRunLog, existing_run.id)
+            if existing_run_id is not None:
+                row = db.get(TradeRunLog, existing_run_id)
                 payload = json.loads(row.response_payload or '{}')
                 payload['run_diagnostics'] = trace
                 serialized = json.dumps(payload, ensure_ascii=False, default=str)
@@ -1038,9 +1035,6 @@ class AutomationSchedulerService(SchedulerService):
                     request_payload=json.dumps({'scheduler_slot': trace['scheduler_slot']}),
                     response_payload=json.dumps({'run_diagnostics': trace}, ensure_ascii=False, default=str)))
             db.commit()
-        if existing_run is not None:
-            existing_run.response_payload = serialized
-            return existing_run
         return result
 
     def _run_automation_tick_observed(
@@ -2247,13 +2241,21 @@ class AutomationSchedulerService(SchedulerService):
         )
 
     def _create_scheduler_skip_log(self, db, *args, **kwargs):
-        # Keep the existing skip result/flow, enriching only its saved telemetry.
+        # Capture scalar values while the creating session is still open.
+        # commit() expires the ORM row; returning it used to fail in the outer
+        # diagnostics wrapper after _run_automation_tick_impl closed the DB.
         run = super()._create_scheduler_skip_log(db, *args, **kwargs)
         response = json.loads(run.response_payload or "{}")
         response.update(market_regime_diagnostics(get_run_market_regime_context(db)))
+        result = {
+            'scheduler_skip_run_id': run.id,
+            'result': run.result,
+            'reason': run.reason,
+            'slot': response.get('scheduler_slot'),
+        }
         run.response_payload = json.dumps(response, ensure_ascii=False, default=str)
         db.commit()
-        return run
+        return result
 
     def _run_profile_analysis(
         self,

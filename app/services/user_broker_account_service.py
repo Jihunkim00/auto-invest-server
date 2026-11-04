@@ -5,7 +5,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Mapping
 
 import requests
@@ -28,6 +28,7 @@ KIS_BALANCE_PATH = '/uapi/domestic-stock/v1/trading/inquire-balance'
 KIS_BALANCE_TR_IDS = {'paper': 'VTTC8434R', 'live': 'TTTC8434R'}
 KIS_OPEN_ORDERS_PATH = '/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl'
 KIS_OPEN_ORDERS_TR_ID = 'TTTC0084R'
+KIS_DAILY_EXECUTIONS_PATH = '/uapi/domestic-stock/v1/trading/inquire-daily-ccld'
 KIS_POSSIBLE_ORDER_PATH = '/uapi/domestic-stock/v1/trading/inquire-psbl-order'
 KIS_POSSIBLE_ORDER_TR_ID = 'TTTC8908R'
 ALPACA_BASE_URLS = {
@@ -171,6 +172,37 @@ class UserKisReadOnlyClient:
             self._open_orders_params(), _require_kis_open_orders_shape,
         )
         return _normalize_kis_snapshot(balance_response, orders_response)
+
+    def inquire_daily_order_executions(
+        self, *, order_no: str, start_date: date, end_date: date,
+    ) -> dict[str, Any]:
+        """Read this owner's order only; incomplete responses fail closed."""
+        if not str(order_no or '').strip():
+            raise ValueError('kis_order_number_required')
+        payload = self._get(
+            KIS_DAILY_EXECUTIONS_PATH,
+            tr_id='TTTC0081R' if self.environment == 'live' else 'VTTC0081R',
+            params={
+                'CANO': str(self.credentials.get('account_no') or ''),
+                'ACNT_PRDT_CD': str(self.credentials.get('account_product_code') or ''),
+                'INQR_STRT_DT': start_date.strftime('%Y%m%d'),
+                'INQR_END_DT': end_date.strftime('%Y%m%d'),
+                'SLL_BUY_DVSN_CD': '00', 'INQR_DVSN': '00', 'PDNO': '',
+                'CCLD_DVSN': '00', 'ORD_GNO_BRNO': '', 'ODNO': str(order_no).strip(),
+                'INQR_DVSN_3': '00', 'INQR_DVSN_1': '',
+                'CTX_AREA_FK100': '', 'CTX_AREA_NK100': '', 'EXCG_ID_DVSN_CD': 'ALL',
+            },
+        )
+        rows = payload.get('output1')
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise UserBrokerUnavailableError('user KIS history shape invalid',
+                details={'error_type': 'history_shape_invalid'})
+        return {
+            'provider': 'kis', 'owner_user_id': self.user_id,
+            'broker_account_id': f'user:{self.user_id}:kis:KR',
+            'environment': self.environment, 'complete': True,
+            'orders': rows, 'raw_status': 'ok',
+        }
 
     def _snapshot_part(self, operation, path, tr_id, params, validate):
         started = time.monotonic()
@@ -555,6 +587,27 @@ class UserBrokerAccountService:
             'fetched_at': _now().isoformat(),
         })
         return snapshot
+
+    def get_kis_read_only_client(self, db: Session, user: User) -> UserKisReadOnlyClient:
+        if user.role == 'admin':
+            raise ValueError('regular_user_required')
+        row = db.query(UserBrokerCredential).filter_by(user_id=user.id, provider='kis').one_or_none()
+        if row is None:
+            raise LookupError('broker_credentials_not_configured')
+        try:
+            self.crypto.ensure_configured()
+            credentials = self.crypto.decrypt(row.encrypted_payload, encryption_version=row.encryption_version)
+        except BrokerCredentialEncryptionNotConfigured as exc:
+            raise UserBrokerEncryptionUnavailableError from exc
+        except BrokerCredentialPayloadError as exc:
+            raise UserBrokerCredentialsUnavailableError from exc
+        if credentials.get('environment') != row.environment or row.environment not in {'live', 'paper'}:
+            raise UserBrokerUnavailableError('user broker credential scope mismatch',
+                details={'error_type': 'credential_scope_mismatch'})
+        return UserKisReadOnlyClient(
+            user_id=user.id, credentials=credentials, credential_identity=_credential_identity(row),
+            http_client=self.http_client, token_manager=self.token_manager, timeout_seconds=self.timeout_seconds,
+        )
 
     def get_live_trading_client(
         self,

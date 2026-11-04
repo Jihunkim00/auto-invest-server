@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import OrderLog, SignalLog, TradeRunLog, User, UserTradingSettings, UserWatchlistAnalysis
 from app.routes.history import _serialize_order, _serialize_run, _serialize_signal
+from app.routes.user_brokers import get_user_broker_account_service, _run as _broker_read
 from app.schemas.user_data import UserTradingSettingsUpdateRequest
 from app.services.auth_dependencies import require_regular_user
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
@@ -19,6 +21,9 @@ from app.services.user_auto_trading_scheduler_service import UserAutoTradingSche
 from app.services.user_watchlist_analysis_scheduler_service import (
     UserWatchlistAnalysisSchedulerService,
 )
+from app.services.user_broker_account_service import UserBrokerAccountService
+from app.services.kis_order_sync_service import KisOrderSyncError, serialize_kis_order
+from app.services.user_kis_order_sync_service import UserKisOrderSyncService
 
 
 router = APIRouter(prefix='/users/me/trading', tags=['user-trading-foundation'])
@@ -432,3 +437,22 @@ def get_my_trading_order(
 ):
     row = _owned_row_or_404(db, OrderLog, order_id, user, 'trading_order_not_found')
     return {**_serialize_order(row), 'owner_user_id': int(row.owner_user_id)}
+
+
+@router.post('/orders/{order_id}/sync')
+def sync_my_kis_trading_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+    account_service: UserBrokerAccountService = Depends(get_user_broker_account_service),
+):
+    row = _owned_row_or_404(db, OrderLog, order_id, user, 'trading_order_not_found')
+    if row.broker != 'kis' or row.market != 'KR':
+        raise HTTPException(status_code=400, detail='order_scope_mismatch')
+    client = _broker_read(lambda: account_service.get_kis_read_only_client(db, user))
+    try:
+        synced = UserKisOrderSyncService(client).sync_order(db, row.id)
+    except KisOrderSyncError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return {**serialize_kis_order(synced), 'owner_user_id': int(user.id),
+            'position_reconciliation': json.loads(synced.last_sync_payload or '{}').get('position_reconciliation')}

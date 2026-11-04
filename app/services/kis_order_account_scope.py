@@ -97,10 +97,14 @@ def _verify_order_owner(db: Session, order: OrderLog, account: AccountLimitConte
             raise AccountTradingLimitError('account_scope_mismatch')
 
 
-def resolve_order_account_scope(db: Session, *, order: OrderLog, client: Any) -> KisOrderAccountScope:
+def resolve_order_account_scope(
+    db: Session, *, order: OrderLog, client: Any, require_enabled: bool = True,
+) -> KisOrderAccountScope:
     if order.owner_user_id is None and db.query(User.id).filter(User.role == 'admin').count() != 1:
         raise AccountTradingLimitError('account_scope_unavailable')
-    account = AccountTradingLimitService.resolve_account(db, owner_user_id=order.owner_user_id)
+    account = AccountTradingLimitService.resolve_account(
+        db, owner_user_id=order.owner_user_id, require_enabled=require_enabled,
+    )
     _verify_order_owner(db, order, account)
     expected = _owner_credentials(db, order.owner_user_id)
     identity = _identity(expected)

@@ -539,6 +539,7 @@ def _is_syncable_status(internal_status: str) -> bool:
     return internal_status in {
         "SUBMITTED",
         "ACCEPTED",
+        "PENDING",
         "PARTIALLY_FILLED",
         "UNKNOWN_STALE",
         "SYNC_FAILED",
