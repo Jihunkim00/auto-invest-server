@@ -61,6 +61,7 @@ import '../../models/ops_settings.dart';
 import '../../models/operation_mode.dart';
 import '../../models/portfolio_orchestrator.dart';
 import '../../models/portfolio_summary.dart';
+import '../../models/trade_fill_history.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
 import '../../models/position_management_dry_run.dart';
@@ -98,6 +99,27 @@ class ApiClient {
       : _client = client ?? createDefaultHttpClient();
 
   final http.Client _client;
+
+  Future<TradeFillPage> fetchTradeFills({
+    required String provider,
+    bool userScoped = false,
+    String period = 'today',
+    int offset = 0,
+    String? asOf,
+  }) async {
+    final query = Uri(queryParameters: {
+      if (provider != 'kis') 'provider': provider,
+      'period': provider == 'kis' && period == 'today' ? 'day' : period,
+      'limit': '20',
+      'offset': '$offset',
+      if (asOf != null) 'as_of': asOf,
+    }).query;
+    final path = provider == 'kis'
+        ? userScoped ? '/users/me/trading/executions' : '/kis/account/executions'
+        : '/trading/fills';
+    return TradeFillPage.fromJson(await _getJsonNoCache('$path?$query'));
+  }
+
   static const _kisLiveConfirmationPhrase =
       'I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER';
 
@@ -625,7 +647,14 @@ class ApiClient {
           _readNullableString(balance?['orderable_cash_source']),
       d1Cash: _readNullableDouble(balance?['d1_cash']),
       d2Cash: _readNullableDouble(balance?['d2_cash']),
-      cashKnown: balance != null,
+      cashKnown: cashBalance != null,
+      marketValueKnown: stockEvaluationAmount != null ||
+          _readNullableDouble(balance?['total_market_value']) != null ||
+          positionsPayload != null,
+      unrealizedPlKnown:
+          _readNullableDouble(balance?['unrealized_pl']) != null ||
+              (positionsPayload != null &&
+                  positions.every((position) => position.unrealizedPlKnown)),
       balanceUnavailable: balance == null,
       positionsUnavailable: positionsPayload == null,
       openOrdersUnavailable: ordersPayload == null,

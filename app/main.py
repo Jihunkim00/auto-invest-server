@@ -54,6 +54,8 @@ from app.routes.strategy_performance import router as strategy_performance_route
 from app.routes.strategy_positions import router as strategy_positions_router
 from app.routes.strategy_risk import router as strategy_risk_router
 from app.routes.trading import router as trading_router
+from app.routes.trade_fills import router as trade_fills_router
+from app.routes.kis_account_executions import router as kis_account_executions_router
 from app.routes.users import admin_router as admin_users_router
 from app.routes.users import user_router as user_data_router
 from app.routes.user_trading import router as user_trading_router
@@ -134,6 +136,8 @@ app.include_router(strategy_performance_router)
 app.include_router(strategy_positions_router)
 app.include_router(strategy_risk_router)
 app.include_router(trading_router)
+app.include_router(trade_fills_router)
+app.include_router(kis_account_executions_router)
 app.include_router(ops_router)
 app.include_router(operation_test4_router)
 app.include_router(scheduler_router)

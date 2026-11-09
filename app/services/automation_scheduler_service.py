@@ -1872,6 +1872,11 @@ class AutomationSchedulerService(SchedulerService):
                     int((context["deadline"] - now).total_seconds()),
                 ))
             self._finish_entry_slot_recovery(context, result)
+            self._slot_dispatcher.finish_retry(
+                account='admin', provider='kis', profile_id=payload['profile_id'],
+                trading_date=context['started_at'].date().isoformat(),
+                slot=payload['scheduler_slot'], result=result, now=self.retry_now_provider(),
+            )
             return None
 
         accepted = bool(self.retry_scheduler(
@@ -2419,6 +2424,7 @@ class AutomationSchedulerService(SchedulerService):
                         now=now_kst,
                         error=exc,
                         read_operation="positions",
+                        monitor_only=True,
                     )
                     monitor_reason = (
                         retry_result.get("reason")
@@ -2921,6 +2927,7 @@ class AutomationSchedulerService(SchedulerService):
         now: datetime,
         error: Exception,
         read_operation: str = "positions",
+        monitor_only: bool = False,
     ) -> dict[str, Any]:
         read_failure = kis_exit_read_failure_diagnostics(
             error,
@@ -2928,7 +2935,11 @@ class AutomationSchedulerService(SchedulerService):
             retry_index=0,
         )
         retry_job = None
-        if read_failure.get("retryable") is True and profile_key:
+        # Normal monitoring already polls again. An empty, recently verified
+        # account needs no SELL job on every transient positions read failure.
+        # The failed read stays unknown and never grants BUY authority.
+        empty_monitor = monitor_only and self._recently_empty_without_exit_exposure(db, profile, now)
+        if read_failure.get("retryable") is True and profile_key and not empty_monitor:
             retry_job = self._schedule_position_exit_retry(
                 db,
                 profile=profile,
@@ -2965,6 +2976,39 @@ class AutomationSchedulerService(SchedulerService):
             "real_order_submitted": False,
             "broker_submit_called": False,
         }
+
+    def _recently_empty_without_exit_exposure(self, db, profile, now):
+        from app.services.kis_daily_entry_accounting import FINAL_STATUSES
+        from app.db.models import User
+        owner = _safe_int(profile.get('owner_user_id'))
+        user = db.get(User, owner) if owner is not None else None
+        if owner is not None and (user is None or user.role != 'admin'):
+            return False
+        if owner is None and db.query(User.id).filter_by(role='admin').count() != 1:
+            return False
+        order_owner = None if user is not None and user.role == 'admin' else owner
+        if db.query(PositionLifecycle.id).filter(
+            PositionLifecycle.owner_user_id == order_owner,
+            PositionLifecycle.status != 'closed',
+        ).first() is not None:
+            return False
+        if db.query(OrderLog.id).filter(
+            OrderLog.owner_user_id == order_owner, OrderLog.broker == 'kis',
+            OrderLog.market == 'KR', OrderLog.side == 'sell',
+            OrderLog.internal_status.notin_(sorted(FINAL_STATUSES)),
+        ).first() is not None:
+            return False
+        # Scope keys are credential-bound; never reuse another account's zero.
+        settings_obj = get_settings()
+        client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+        scope = kis_client_cache_scope(client)
+        if scope is None:
+            return False
+        cached_at, positions = self._position_exit_positions_cache.get(scope, (None, None))
+        if cached_at is None or positions is None:
+            return False
+        age = (self._as_kst(now).astimezone(UTC) - cached_at).total_seconds()
+        return 0 <= age < POSITION_EXIT_POSITION_CACHE_SECONDS and positions == []
 
     def _schedule_position_exit_retry_from_result(
         self,
@@ -3783,6 +3827,8 @@ class AutomationSchedulerService(SchedulerService):
                     else self._new_account_snapshot_retry_service()
                 )
                 retry_now = retry_service.retry_now_provider()
+                from app.services.scheduler_task_supervisor import check_scheduler_task_active
+                check_scheduler_task_active()
                 result = retry_service._run_automation_tick(
                     slot,
                     retry_now,
@@ -3802,7 +3848,18 @@ class AutomationSchedulerService(SchedulerService):
                     ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
                     type(exc).__name__,
                 )
+                from app.services.scheduler_task_supervisor import SchedulerTaskExpired
+                self._slot_dispatcher.finish_retry(
+                    account='admin', provider='kis', profile_id=profile_id,
+                    trading_date=trading_date, slot=slot, now=self.retry_now_provider(),
+                    result={'result': 'failed', 'reason': str(exc) if isinstance(exc, SchedulerTaskExpired)
+                            else 'account_snapshot_retry_worker_failed'},
+                )
                 return None
+            self._slot_dispatcher.finish_retry(
+                account='admin', provider='kis', profile_id=profile_id,
+                trading_date=trading_date, slot=slot, result=result, now=self.retry_now_provider(),
+            )
             if (
                 isinstance(result, dict)
                 and result.get('status') == 'retry_pending'

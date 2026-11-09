@@ -1798,6 +1798,44 @@ class AccountTradingLimitAudit(Base):
     changed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class KisOrderSubmissionEvidence(Base):
+    """Durable pre-dispatch proof, kept separate from analysis run history."""
+    __tablename__ = 'kis_order_submission_evidence'
+
+    id = Column(Integer, primary_key=True)
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, index=True)
+    order_fingerprint = Column(String(64), nullable=False)
+    kind = Column(String(40), nullable=False)
+    source = Column(String(40), nullable=False)
+    protocol = Column(String(60), nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class KisLegacyOrderReconciliation(Base):
+    """Explicit approval to close a legacy order after complete broker-side absence proof."""
+    __tablename__ = 'kis_legacy_order_reconciliations'
+    __table_args__ = (UniqueConstraint('order_id', name='uq_kis_legacy_reconciliation_order'),)
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, index=True)
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    policy_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    broker_account_id = Column(String(120), nullable=False)
+    original_fingerprint = Column(String(64), nullable=False)
+    terminal_fingerprint = Column(String(64), nullable=False)
+    reservation_fingerprint = Column(String(64), nullable=False)
+    evidence_digest = Column(String(64), nullable=False)
+    approval_digest = Column(String(64), nullable=False)
+    approved_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    approval_reference = Column(String(160), nullable=False)
+    before_state_json = Column(Text, nullable=False)
+    after_state_json = Column(Text, nullable=False)
+    evidence_summary_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class AccountBuyExecutionClaim(Base):
     # A DB-unique account mutex, shared by both automation engines and workers.
     # Crash/uncertain POST claims persist until broker/order reconciliation.

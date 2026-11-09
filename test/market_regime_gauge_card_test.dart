@@ -16,6 +16,12 @@ void main() {
     final kis = DashboardController(ApiClient(), autoload: false)
       ..marketRegime = _regime(2);
     await tester.pumpWidget(_home(kis));
+    // Home places positions and real execution history before market context.
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('home-market-regime-gauge-card')),
+      find.byKey(const ValueKey('home-simple-scroll-view')),
+      const Offset(0, -250),
+    );
     expect(find.byKey(const ValueKey('home-market-regime-gauge-card')),
         findsOneWidget);
     kis.dispose();
@@ -24,6 +30,9 @@ void main() {
       ..selectedProvider = SelectedProvider.alpaca
       ..marketRegime = _regime(2);
     await tester.pumpWidget(_home(alpaca));
+    await tester.drag(find.byKey(const ValueKey('home-simple-scroll-view')),
+        const Offset(0, -1000));
+    await tester.pump();
     expect(find.byKey(const ValueKey('home-market-regime-gauge-card')),
         findsNothing);
     alpaca.dispose();

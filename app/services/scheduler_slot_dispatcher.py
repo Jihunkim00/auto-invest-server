@@ -37,11 +37,15 @@ class SchedulerSlotDispatcher:
                 AutomationSchedulerSlot.status == 'pending',
                 AutomationSchedulerSlot.scheduled_at <= current - timedelta(minutes=1),
             ).values(status='missed', reason='slot_window_elapsed_no_catchup', finished_at=current))
-            db.execute(update(AutomationSchedulerSlot).where(
+            overdue = db.query(AutomationSchedulerSlot).filter(
                 AutomationSchedulerSlot.status.in_(['running', 'retry_pending']),
                 AutomationSchedulerSlot.started_at <= current - timedelta(seconds=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS),
-            ).values(status='failed', reason='scheduler_task_timeout', finished_at=current))
+            ).all()
+            expired = [(row.id, row.status, row.result_json) for row in overdue]
             db.commit()
+        for row_id, status, previous in expired:
+            self._finish(row_id, 'failed', 'scheduler_task_timeout', now, expected=status,
+                         result=self._timeout_result(previous))
 
     def reconcile(self, *, account, provider, profile_id, slots, now, callback):
         """Register the whole day, expire missed slots, atomically claim only due ones."""
@@ -63,7 +67,8 @@ class SchedulerSlotDispatcher:
                         row = db.query(AutomationSchedulerSlot).filter_by(slot_key=key).one()
                 row_id = row.id
                 if row.status in {'running', 'retry_pending'} and row.started_at and current - row.started_at >= timedelta(seconds=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS):
-                    self._finish(row_id, 'failed', 'scheduler_task_timeout', now, expected=row.status)
+                    self._finish(row_id, 'failed', 'scheduler_task_timeout', now, expected=row.status,
+                                 result=self._timeout_result(row.result_json))
                     continue
                 if row.status != 'pending' or current < nominal:
                     continue
@@ -90,8 +95,9 @@ class SchedulerSlotDispatcher:
                     status, reason = self._outcome(result)
                     self._finish(row_id, status, reason, self.now(), result=result)
                 except Exception as exc:
-                    self._finish(row_id, 'failed', str(exc) if isinstance(exc, SchedulerTaskExpired)
-                                 else f'scheduler_slot_failed:{type(exc).__name__}', self.now())
+                    reason = str(exc) if isinstance(exc, SchedulerTaskExpired) else f'scheduler_slot_failed:{type(exc).__name__}'
+                    self._finish(row_id, 'failed', reason, self.now(),
+                                 result={'result': 'failed', 'reason': reason})
                     raise
 
             if not self.supervisor.launch(f'account-{account}', execute, timeout=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS, critical=True,
@@ -134,6 +140,39 @@ class SchedulerSlotDispatcher:
                          'reason': row.reason, 'scheduled_at': row.scheduled_at.replace(tzinfo=UTC).isoformat()}
                         for row in recent]}
 
+    def finish_retry(self, *, account, provider, profile_id, trading_date, slot, result, now):
+        """Publish the outcome of a detached retry to its original slot only.
+
+        Terminal rows are immutable here: an expired worker cannot overwrite a
+        timeout, and a retry for an old profile cannot finish a replacement.
+        """
+        key = f'{account}:{provider}:{trading_date}:{slot}'
+        with self.sessions() as db:
+            row = db.query(AutomationSchedulerSlot).filter_by(
+                slot_key=key, profile_id=profile_id,
+            ).filter(AutomationSchedulerSlot.status.in_(['running', 'retry_pending'])).first()
+            if row is None:
+                return False
+            row_id = row.id
+            expected = row.status
+            expired = (row.started_at is None or utc_naive(now) - row.started_at
+                       >= timedelta(seconds=ACCOUNT_SLOT_TASK_TIMEOUT_SECONDS))
+        status, reason = ('failed', 'scheduler_task_timeout') if expired else self._outcome(result)
+        if expired:
+            result = self._timeout_result(result)
+        self._finish(row_id, status, reason, now, result=result, expected=expected)
+        return True
+
+    @staticmethod
+    def _timeout_result(previous):
+        if isinstance(previous, str):
+            try:
+                previous = json.loads(previous)
+            except (TypeError, ValueError):
+                previous = None
+        return {'result': 'failed', 'reason': 'scheduler_task_timeout',
+                'last_observed_result': previous}
+
     @staticmethod
     def _outcome(result):
         if not isinstance(result, dict):
@@ -146,6 +185,8 @@ class SchedulerSlotDispatcher:
             return 'skipped', 'no_eligible_user_for_slot'
         raw = str(result.get('result') or result.get('action') or result.get('status') or '').lower()
         reason = str(result.get('reason') or result.get('primary_block_reason') or raw)[:240]
+        if reason == 'gpt_buy_score_below_threshold':
+            return 'HOLD', reason
         if raw == 'retry_pending':
             return 'retry_pending', reason
         if raw in {'error', 'failed'}:

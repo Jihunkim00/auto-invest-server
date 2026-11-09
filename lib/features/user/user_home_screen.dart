@@ -27,6 +27,7 @@ class UserHomeScreen extends StatefulWidget {
 class _UserHomeScreenState extends State<UserHomeScreen> {
   String _mode = 'paper';
   bool _modeLoading = false;
+  int _contextVersion = 0;
 
   @override
   void initState() {
@@ -35,17 +36,35 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     unawaited(widget.controller.loadUserHomeRecentActivity());
   }
 
+  @override
+  void didUpdateWidget(covariant UserHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.user.id != widget.user.id ||
+        oldWidget.user.username != widget.user.username) {
+      _contextVersion += 1;
+      _mode = 'paper';
+      _modeLoading = false;
+      unawaited(_loadTradingMode());
+      unawaited(widget.controller.loadUserHomeRecentActivity());
+    }
+  }
+
   Future<bool> _loadTradingMode({bool forceFetch = false}) async {
+    final version = _contextVersion;
+    final controller = widget.controller;
     try {
       late final Map<String, dynamic> settings;
-      if (!forceFetch && widget.controller.regularUserHomeBootstrapStarted) {
-        await widget.controller.waitForRegularUserHomeContext();
-        if (!widget.controller.userTradingSettingsLoaded) return false;
-        settings = widget.controller.userTradingSettings;
+      if (!forceFetch && controller.regularUserHomeBootstrapStarted) {
+        await controller.waitForRegularUserHomeContext();
+        if (!controller.userTradingSettingsLoaded) return false;
+        settings = controller.userTradingSettings;
       } else {
-        settings = await widget.controller.apiClient.fetchUserTradingSettings();
+        settings = await controller.apiClient.fetchUserTradingSettings();
       }
-      if (!mounted) return false;
+      if (!mounted || version != _contextVersion) return false;
+      controller.userTradingSettings = settings;
+      controller.userTradingSettingsLoaded = true;
       setState(() => _mode =
           settings['trading_mode']?.toString() == 'live' ? 'live' : 'paper');
       return true;
@@ -57,11 +76,14 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
 
   Future<void> _changeTradingMode(String mode) async {
     if (mode == _mode) return;
+    final version = _contextVersion;
+    final controller = widget.controller;
     if (mounted) setState(() => _modeLoading = true);
     try {
-      await widget.controller.apiClient.updateUserTradingSettings(
+      await controller.apiClient.updateUserTradingSettings(
         tradingMode: mode,
       );
+      if (!mounted || version != _contextVersion) return;
       final reloaded = await _loadTradingMode(forceFetch: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -73,6 +95,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         );
       }
     } catch (_) {
+      if (!mounted || version != _contextVersion) return;
       await _loadTradingMode(forceFetch: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -80,7 +103,9 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _modeLoading = false);
+      if (mounted && version == _contextVersion) {
+        setState(() => _modeLoading = false);
+      }
     }
   }
 

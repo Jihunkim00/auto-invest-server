@@ -9,6 +9,7 @@ import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/home_latest_ai_decision_card.dart';
 import 'widgets/market_regime_gauge_card.dart';
+import 'widgets/trade_history_card.dart';
 
 /// User-facing Home surface. Advanced diagnostics and raw runtime controls stay
 /// behind Admin; this screen only reports the effective operation state.
@@ -66,16 +67,18 @@ class HomeScreen extends StatelessWidget {
             : null;
         return SafeArea(
           child: RefreshIndicator(
-            onRefresh: readOnlyUser
-                ? () async {
-                    await Future.wait([
-                      controller.refreshUserBrokerAccounts(),
-                      controller.loadUserHomeRecentActivity(),
-                      if (controller.isKisSelected)
-                        controller.loadMarketRegime(silent: true),
-                    ]);
-                  }
-                : controller.load,
+            onRefresh: () async {
+              await Future.wait([
+                controller.loadTradeFills(force: true),
+                if (readOnlyUser) ...[
+                  controller.refreshUserBrokerAccounts(),
+                  controller.loadUserHomeRecentActivity(),
+                  if (controller.isKisSelected)
+                    controller.loadMarketRegime(silent: true),
+                ] else
+                  controller.load(),
+              ]);
+            },
             child: ListView(
               key: const ValueKey('home-simple-scroll-view'),
               padding: const EdgeInsets.all(AppTheme.pagePadding),
@@ -121,6 +124,20 @@ class HomeScreen extends StatelessWidget {
                   loadingOverride: userLoading,
                   userError: userError,
                 ),
+                const SizedBox(height: 12),
+                _PositionsCard(
+                  key: ValueKey('positions-${controller.tradeFillContextKey}'),
+                  controller: controller,
+                  summaryOverride: userSummary,
+                  readOnlyUser: readOnlyUser,
+                  loadingOverride: userLoading,
+                  userError: userError,
+                ),
+                const SizedBox(height: 12),
+                TradeHistoryCard(
+                  key: ValueKey('history-${controller.tradeFillContextKey}'),
+                  controller: controller,
+                ),
                 if (controller.isKisSelected) ...[
                   const SizedBox(height: 12),
                   MarketRegimeGaugeCard(
@@ -129,14 +146,6 @@ class HomeScreen extends StatelessWidget {
                     error: controller.marketRegimeError,
                   ),
                 ],
-                const SizedBox(height: 12),
-                _PositionsCard(
-                  controller: controller,
-                  summaryOverride: userSummary,
-                  readOnlyUser: readOnlyUser,
-                  loadingOverride: userLoading,
-                  userError: userError,
-                ),
                 const SizedBox(height: 12),
                 _DecisionCard(
                     controller: controller,
@@ -476,9 +485,6 @@ class _OperationModeCard extends StatelessWidget {
         : _operationModeColor(mode);
     final loading =
         isUserMode ? userLoading : controller.kisAutomationSettingsLoading;
-    final detail = isUserMode
-        ? _userOperationModeDetail(mode)
-        : _operationModeDetail(strings, mode);
 
     return SectionCard(
       key: const ValueKey('home-operation-mode-card'),
@@ -490,7 +496,7 @@ class _OperationModeCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           onTap: loading ? null : () => _selectOperationMode(context),
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -500,36 +506,34 @@ class _OperationModeCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(isUserMode ? '거래 모드' : strings.operationMode,
-                          style: Theme.of(context).textTheme.titleMedium),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(isUserMode ? '거래 모드' : strings.operationMode,
+                              style: Theme.of(context).textTheme.titleMedium),
+                          Text(
+                            isUserMode
+                                ? _userOperationModeLabel(mode)
+                                : _operationModeLabel(strings, mode),
+                            style: TextStyle(
+                                color: color,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800),
+                          ),
+                          if (mode.contains('live'))
+                            const Text('LIVE',
+                                style: TextStyle(
+                                    color: AppTheme.danger,
+                                    fontWeight: FontWeight.w900)),
+                        ],
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         isUserMode
-                            ? _userOperationModeLabel(mode)
-                            : _operationModeLabel(strings, mode),
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(detail,
-                          style: const TextStyle(
-                              color: Colors.white70, height: 1.35)),
-                      const SizedBox(height: 12),
-                      Text(
-                        strings.isKorean ? '현재 실행 가능 상태' : 'Execution status',
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        isUserMode
-                            ? _userExecutionStatus(mode)
+                            ? _userExecutionStatus(
+                                mode, controller.userTradingSettings)
                             : _executionStatusLabel(strings, controller),
                         style: TextStyle(
                           color: isUserMode
@@ -538,7 +542,7 @@ class _OperationModeCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 6),
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
@@ -575,15 +579,29 @@ class _OperationModeCard extends StatelessWidget {
     bool isUserMode,
   ) {
     if (isUserMode) {
+      final settings = controller.userTradingSettings;
       return [
         _ModeStatePill(
-          label: '모의투자',
+          label: 'Dry-run',
           enabled: mode == 'paper',
         ),
         _ModeStatePill(
-          label: '실거래',
-          enabled: mode == 'live',
-          alert: mode == 'live',
+          label: 'KIS 스케줄러',
+          enabled: settings['auto_trading_provider'] == null
+              ? null
+              : settings['auto_trading_provider'] == 'kis' &&
+                  settings['auto_trading_enabled'] == true,
+        ),
+        _ModeStatePill(
+          label: '실주문 허용',
+          enabled: settings['live_trading_enabled'] as bool?,
+          alert: settings['live_trading_enabled'] == true,
+        ),
+        const _ModeStatePill(label: '브로커 동기화', enabled: null),
+        _ModeStatePill(
+          label: '긴급 정지',
+          enabled: settings['kill_switch'] as bool?,
+          alert: settings['kill_switch'] == true,
         ),
       ];
     }
@@ -832,14 +850,14 @@ class _ModeStatePill extends StatelessWidget {
   });
 
   final String label;
-  final bool enabled;
+  final bool? enabled;
   final bool alert;
 
   @override
   Widget build(BuildContext context) {
     final color = alert
         ? AppTheme.danger
-        : enabled
+        : enabled == true
             ? AppTheme.positive
             : Colors.white54;
     return Container(
@@ -849,7 +867,7 @@ class _ModeStatePill extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        '$label ${enabled ? 'ON' : 'OFF'}',
+        '$label ${enabled == null ? '미확인' : enabled! ? 'ON' : 'OFF'}',
         style:
             TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
       ),
@@ -898,8 +916,15 @@ String _userOperationModeDetail(String mode) => switch (mode.trim()) {
       _ => '실제 주문 없이 안전하게 시뮬레이션합니다.',
     };
 
-String _userExecutionStatus(String mode) =>
-    mode.trim() == 'live' ? '실거래 모드 선택됨' : '모의투자 실행 가능';
+String _userExecutionStatus(String mode, Map<String, dynamic> settings) {
+  if (settings['kill_switch'] == true) return '긴급 정지 ON · 실거래 차단';
+  if (mode.trim() != 'live') return '모의투자 실행 가능';
+  if (settings['live_trading_enabled'] != true ||
+      settings['kill_switch'] != false) {
+    return '실거래 모드 선택됨 · 실주문 차단 또는 상태 미확인';
+  }
+  return '실거래 모드 선택됨 · 안전 조건 통과 시 실제 주문 가능';
+}
 
 Color _operationModeColor(String mode) => switch (mode.trim()) {
       'full_live_test_mode' => AppTheme.danger,
@@ -913,7 +938,7 @@ String _executionStatusLabel(
   final korean = strings.isKorean;
   final mode = controller.settings.currentOperationMode;
   if (controller.settings.killSwitch) return korean ? '실거래 차단' : 'Live blocked';
-  if (mode == 'full_live_test_mode') {
+  if (mode.contains('live')) {
     return controller.automationModeStatus?.canSubmitLiveOrder == true
         ? (korean ? '실거래 준비됨' : 'Live ready')
         : (korean ? '실거래 준비 점검 필요' : 'Live readiness required');
@@ -991,9 +1016,13 @@ class _PortfolioCard extends StatelessWidget {
         ),
       );
     }
-    final total = isKis
-        ? summary.totalAssetValue ?? summary.totalMarketValue + summary.cash
-        : summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
+    final total = summary.totalAssetValue ??
+        (!summary.balanceUnavailable &&
+                summary.marketValueKnown &&
+                summary.cashKnown
+            ? (summary.stockEvaluationAmount ?? summary.totalMarketValue) +
+                summary.cash
+            : null);
     return SectionCard(
       key: const ValueKey('home-portfolio-card'),
       child: Column(
@@ -1016,18 +1045,37 @@ class _PortfolioCard extends StatelessWidget {
               readOnlyUser: summaryOverride != null,
             )
           else
-            Wrap(
-              spacing: 24,
-              runSpacing: 14,
+            _ResponsiveMetrics(
               children: [
-                _Metric(strings.value, _money(summary.currency, total)),
+                _Metric(
+                    strings.value,
+                    total == null
+                        ? strings.unknownValue
+                        : _money(summary.currency, total)),
+                _Metric(
+                    strings.isKorean ? '보유주식 평가액' : 'Stock Value',
+                    summary.marketValueKnown && !summary.positionsUnavailable
+                        ? _money(summary.currency, summary.totalMarketValue)
+                        : strings.unknownValue),
                 _Metric(
                     strings.cash,
-                    summary.cashKnown
+                    summary.cashKnown && !summary.balanceUnavailable
                         ? _money(summary.currency, summary.cash)
                         : strings.unknownValue),
-                _Metric(strings.pnl,
-                    _signedMoney(summary.currency, summary.totalUnrealizedPl)),
+                _Metric(
+                    strings.isKorean ? '주문가능' : 'Orderable Cash',
+                    summary.orderableCash == null
+                        ? strings.unknownValue
+                        : _money(summary.currency, summary.orderableCash!)),
+                _Metric(
+                    strings.pnl,
+                    summary.unrealizedPlKnown && !summary.positionsUnavailable
+                        ? _signedMoney(
+                            summary.currency, summary.totalUnrealizedPl)
+                        : strings.unknownValue,
+                    color: summary.totalUnrealizedPl >= 0
+                        ? AppTheme.positive
+                        : AppTheme.danger),
               ],
             ),
         ],
@@ -1046,71 +1094,66 @@ class _KisPortfolioMetrics extends StatelessWidget {
   });
 
   final PortfolioSummary summary;
-  final double totalAssets;
+  final double? totalAssets;
   final bool isKorean;
   final String unknownValue;
   final bool readOnlyUser;
 
   @override
   Widget build(BuildContext context) {
-    final stockValue = summary.stockEvaluationAmount ??
-        summary.positions.fold<double>(
-          0,
-          (total, position) => total + position.marketValue,
-        );
+    final stockValue =
+        summary.stockEvaluationAmount ?? summary.totalMarketValue;
     final cashBalance = summary.cashBalance ?? summary.cash;
     final cashKnown = summary.cashBalance != null || summary.cashKnown;
     final plLabel = isKorean ? '평가손익' : 'Unrealized P/L';
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return _ResponsiveMetrics(
       children: [
-        Wrap(
-          spacing: 24,
-          runSpacing: 14,
-          children: [
-            _Metric(
-              isKorean ? '총자산' : 'Total Assets',
-              _kisMoney(summary.currency, totalAssets),
-            ),
-            _Metric(
-              isKorean ? '보유주식 평가액' : 'Stock Value',
-              _kisMoney(summary.currency, stockValue),
-            ),
-            _Metric(
-              isKorean ? '예수금' : 'Cash Balance',
-              cashKnown
-                  ? _kisMoney(summary.currency, cashBalance)
-                  : unknownValue,
-            ),
-            _Metric(
-              readOnlyUser
-                  ? '\uB9E4\uC218\uAC00\uB2A5\uAE08\uC561'
-                  : isKorean
-                      ? '주문가능'
-                      : 'Orderable Cash',
-              _kisOrderableCash(summary, isKorean: isKorean),
-            ),
-          ],
+        _Metric(
+          isKorean ? '총자산' : 'Total Assets',
+          totalAssets == null || summary.balanceUnavailable
+              ? unknownValue
+              : _kisMoney(summary.currency, totalAssets!),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 24,
-          runSpacing: 14,
-          children: [
-            _Metric(
-              plLabel,
-              _signedKisMoney(summary.currency, summary.totalUnrealizedPl),
-            ),
-          ],
+        _Metric(
+          isKorean ? '보유주식 평가액' : 'Stock Value',
+          summary.positionsUnavailable || !summary.marketValueKnown
+              ? unknownValue
+              : _kisMoney(summary.currency, stockValue),
+        ),
+        _Metric(
+          isKorean ? '예수금' : 'Cash Balance',
+          cashKnown && !summary.balanceUnavailable
+              ? _kisMoney(summary.currency, cashBalance)
+              : unknownValue,
+        ),
+        _Metric(
+          readOnlyUser
+              ? '\uB9E4\uC218\uAC00\uB2A5\uAE08\uC561'
+              : isKorean
+                  ? '주문가능'
+                  : 'Orderable Cash',
+          summary.balanceUnavailable
+              ? unknownValue
+              : _kisOrderableCash(summary, isKorean: isKorean),
+        ),
+        _Metric(
+          plLabel,
+          summary.positionsUnavailable || !summary.unrealizedPlKnown
+              ? unknownValue
+              : _signedKisMoney(summary.currency, summary.totalUnrealizedPl),
+          color: summary.totalUnrealizedPl >= 0
+              ? AppTheme.positive
+              : AppTheme.danger,
         ),
       ],
     );
   }
 }
 
-class _PositionsCard extends StatelessWidget {
+class _PositionsCard extends StatefulWidget {
   const _PositionsCard({
+    super.key,
     required this.controller,
     this.summaryOverride,
     this.readOnlyUser = false,
@@ -1125,7 +1168,23 @@ class _PositionsCard extends StatelessWidget {
   final String? userError;
 
   @override
+  State<_PositionsCard> createState() => _PositionsCardState();
+}
+
+class _PositionsCardState extends State<_PositionsCard>
+    with AutomaticKeepAliveClientMixin {
+  bool _expanded = false;
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final controller = widget.controller;
+    final summaryOverride = widget.summaryOverride;
+    final readOnlyUser = widget.readOnlyUser;
+    final loadingOverride = widget.loadingOverride;
+    final userError = widget.userError;
     final strings = controller.strings;
     final providedSummary = summaryOverride;
     final isKis = providedSummary == null
@@ -1135,7 +1194,9 @@ class _PositionsCard extends StatelessWidget {
         (readOnlyUser
             ? PortfolioSummary.empty(currency: isKis ? 'KRW' : 'USD')
             : controller.selectedPortfolioSummary);
-    final positions = summary.positions.take(3).toList(growable: false);
+    final positions =
+        (_expanded ? summary.positions : summary.positions.take(3))
+            .toList(growable: false);
     return SectionCard(
       key: const ValueKey('home-positions-card'),
       child: Column(
@@ -1157,13 +1218,16 @@ class _PositionsCard extends StatelessWidget {
               '\uACC4\uC88C \uC815\uBCF4\uB97C \uC870\uD68C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.',
               style: TextStyle(color: AppTheme.warning),
             )
+          else if (summary.positionsUnavailable)
+            Text(strings.unavailablePortfolio,
+                style: const TextStyle(color: AppTheme.warning))
           else if (positions.isEmpty)
             Text(strings.noHeldPositions,
                 style: const TextStyle(color: Colors.white70))
           else
             for (final position in positions)
               Padding(
-                padding: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1181,7 +1245,10 @@ class _PositionsCard extends StatelessWidget {
                     const SizedBox(width: 10),
                     Flexible(
                       child: Text(
-                        _signedMoney(summary.currency, position.unrealizedPl),
+                        position.unrealizedPlKnown
+                            ? _signedMoney(
+                                summary.currency, position.unrealizedPl)
+                            : strings.unknownValue,
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           color: position.unrealizedPl >= 0
@@ -1194,6 +1261,13 @@ class _PositionsCard extends StatelessWidget {
                   ],
                 ),
               ),
+          if (summary.positions.length > 3 && !loadingOverride)
+            TextButton(
+              key: const ValueKey('home-positions-toggle'),
+              onPressed: () => setState(() => _expanded = !_expanded),
+              child:
+                  Text(_expanded ? '접기' : '전체 ${summary.positions.length}개 보기'),
+            ),
         ],
       ),
     );
@@ -1216,10 +1290,11 @@ class _DecisionCard extends StatelessWidget {
 }
 
 class _Metric extends StatelessWidget {
-  const _Metric(this.label, this.value);
+  const _Metric(this.label, this.value, {this.color});
 
   final String label;
   final String value;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -1228,10 +1303,32 @@ class _Metric extends StatelessWidget {
       children: [
         Text(label, style: const TextStyle(color: Colors.white54)),
         const SizedBox(height: 3),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+        Text(value,
+            style: TextStyle(fontWeight: FontWeight.w800, color: color)),
       ],
     );
   }
+}
+
+class _ResponsiveMetrics extends StatelessWidget {
+  const _ResponsiveMetrics({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) =>
+      LayoutBuilder(builder: (context, constraints) {
+        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final columns = constraints.maxWidth >= 850 * scale
+            ? 5
+            : constraints.maxWidth >= 500 * scale
+                ? 3
+                : 2;
+        const gap = 12.0;
+        final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+        return Wrap(spacing: gap, runSpacing: 10, children: [
+          for (final child in children) SizedBox(width: width, child: child),
+        ]);
+      });
 }
 
 class _InlineNotice extends StatelessWidget {

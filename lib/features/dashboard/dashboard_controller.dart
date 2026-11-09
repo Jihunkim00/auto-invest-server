@@ -68,6 +68,7 @@ import '../../models/order_validation_result.dart';
 import '../../models/operator_alerts.dart';
 import '../../models/portfolio_orchestrator.dart';
 import '../../models/portfolio_summary.dart';
+import '../../models/trade_fill_history.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
 import '../../models/position_management_dry_run.dart';
@@ -272,6 +273,105 @@ class DashboardController extends ChangeNotifier {
   int _marketRegimeRequestVersion = 0;
 
   bool homeRecentActivityLoaded = false;
+  TradeFillPage? tradeFillPage;
+  List<TradeFill> tradeFills = const [];
+  String tradeFillPeriod = 'today';
+  String? tradeFillError;
+  String? tradeFillErrorCode;
+  bool tradeFillLoading = false;
+  bool tradeFillLoadingMore = false;
+  bool _tradeFillRequested = false;
+  int _tradeFillRequestVersion = 0;
+
+  String get tradeFillContextKey =>
+      '$_authSessionGeneration:$_authenticatedRegularUserScope:$selectedProviderCode';
+
+  Future<void> loadTradeFills(
+      {bool force = false, String? period, bool more = false}) async {
+    if (_disposed || _authenticatedSessionInvalidated) return;
+    if (period != null && period != tradeFillPeriod) {
+      tradeFillPeriod = period;
+      force = true;
+    }
+    if (more) {
+      if (tradeFillLoading ||
+          tradeFillLoadingMore ||
+          tradeFillPage?.nextOffset == null) {
+        return;
+      }
+    } else if (!force && _tradeFillRequested) {
+      return;
+    }
+    final version = ++_tradeFillRequestVersion;
+    final session = _authSessionGeneration;
+    final contextKey = tradeFillContextKey;
+    final offset = more ? tradeFillPage!.nextOffset! : 0;
+    final asOf = more ? tradeFillPage!.endAt : null;
+    _tradeFillRequested = true;
+    tradeFillError = null;
+    tradeFillErrorCode = null;
+    tradeFillLoading = !more;
+    tradeFillLoadingMore = more;
+    if (!more) {
+      tradeFillPage = null;
+      tradeFills = const [];
+    }
+    notifyListeners();
+    bool current() =>
+        _isCurrentAuthSession(session) &&
+        version == _tradeFillRequestVersion &&
+        contextKey == tradeFillContextKey;
+    try {
+      final page = await apiClient.fetchTradeFills(
+        provider: selectedProviderCode,
+        userScoped: _authenticatedRegularUserScope != null ||
+            (_authenticatedSessionIdentity?.startsWith('user:') ?? false),
+        period: tradeFillPeriod,
+        offset: offset,
+        asOf: asOf,
+      );
+      if (!current()) return;
+      if (page.status != 'success') {
+        tradeFillPage = null;
+        tradeFills = const [];
+        tradeFillErrorCode = page.code;
+        tradeFillError = switch (page.status) {
+          'not_connected' => '한국투자증권 계좌 연결이 필요합니다.',
+          'authentication_failed' => '한국투자증권 인증을 확인해 주세요.',
+          'incomplete' => '일부 거래 내역을 확인하지 못했습니다.',
+          _ => '거래 내역을 불러오지 못했습니다.',
+        };
+        return;
+      }
+      tradeFillPage = page;
+      final combined = more ? [...tradeFills, ...page.items] : page.items;
+      tradeFills = {for (final item in combined) item.id: item}.values.toList();
+    } catch (_) {
+      if (!current()) return;
+      tradeFillPage = null;
+      tradeFills = const [];
+      tradeFillError = '체결 내역을 불러오지 못했습니다.';
+    } finally {
+      if (current()) {
+        tradeFillLoading = false;
+        tradeFillLoadingMore = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  void _clearTradeFills() {
+    _tradeFillRequestVersion += 1;
+    _tradeFillRequested = false;
+    tradeFillPage = null;
+    tradeFills = const [];
+    tradeFillPeriod = 'today';
+    tradeFillError = null;
+    tradeFillErrorCode = null;
+    tradeFillLoading = false;
+    tradeFillLoadingMore = false;
+  }
+
   String? homeRecentActivityError;
   AutomationTodayDecisions todayAiDecisions = AutomationTodayDecisions.empty;
   bool todayAiDecisionsLoaded = false;
@@ -798,6 +898,7 @@ class DashboardController extends ChangeNotifier {
   ManualTradingRunResult? manualRunResult;
 
   void clearRegularUserHomeContext() {
+    _clearTradeFills();
     if (_authenticatedRegularUserScope == null &&
         _authenticatedRegularUserOwnerKey == null) {
       return;
@@ -2407,6 +2508,7 @@ class DashboardController extends ChangeNotifier {
   }
 
   void _clearProviderScopedState() {
+    _clearTradeFills();
     _marketRegimeRequestVersion += 1;
     marketRegime = null;
     marketRegimeLoading = false;

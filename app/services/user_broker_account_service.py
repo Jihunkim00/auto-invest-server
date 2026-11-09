@@ -173,6 +173,16 @@ class UserKisReadOnlyClient:
         )
         return _normalize_kis_snapshot(balance_response, orders_response)
 
+    def inquire_account_executions_page(self, *, budget, **query):
+        """Full account history with continuation; independent of order sync."""
+        from app.brokers.kis_account_execution_reader import read_execution_page
+
+        return read_execution_page(
+            credentials=self.credentials,
+            get_token=lambda refresh: self._token(force_refresh=refresh),
+            send_get=self.http_client.get, budget=budget, **query,
+        )
+
     def inquire_daily_order_executions(
         self, *, order_no: str, start_date: date, end_date: date,
     ) -> dict[str, Any]:

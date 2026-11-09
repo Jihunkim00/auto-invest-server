@@ -803,6 +803,21 @@ class KisClient:
 
         return orders
 
+    def inquire_account_executions_page(self, *, budget, **query):
+        """Read all account executions; do not reuse the PR142 order sync call."""
+        from app.brokers.kis_account_execution_reader import read_execution_page
+
+        return read_execution_page(
+            credentials={
+                'environment': self.settings.kis_env,
+                'account_no': self.settings.kis_account_no,
+                'account_product_code': self.settings.kis_account_product_code,
+                'app_key': self.settings.kis_app_key, 'app_secret': self.settings.kis_app_secret,
+            },
+            get_token=lambda refresh: self.get_access_token(force_refresh=refresh).token,
+            send_get=requests.get, budget=budget, **query,
+        )
+
     def inquire_daily_order_executions(
         self,
         *,

@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import AccountBuyExecutionClaim, OrderLog, PositionLifecycle, User, UserBrokerCredential
+from app.services.kis_legacy_order_state import LEGACY_ABSENCE_VERIFIED, verified_legacy_absence
 
 
 class AccountTradingLimitError(ValueError):
@@ -181,10 +182,13 @@ class AccountTradingLimitService:
                 OrderLog.internal_status.in_([
                     'REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING',
                     'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED', 'FILLED',
+                    LEGACY_ABSENCE_VERIFIED,
                 ]),
             ).all()
             for order in orders:
                 if order.id == exclude_order_id:
+                    continue
+                if order.internal_status == LEGACY_ABSENCE_VERIFIED and verified_legacy_absence(db, order):
                     continue
                 limits = None
                 if order.internal_status == 'FILLED':

@@ -570,6 +570,9 @@ class AutomationProfileBuySchedulerService:
         reservation.order_id = order.id
         request_payload = json.loads(order.request_payload or '{}')
         request_payload['reservation_id'] = reservation.id
+        # Set only when creating a new order. Never retrofit historical orders:
+        # their REQUESTED status alone cannot prove a pre-dispatch origin.
+        request_payload['dispatch_protocol'] = 'durable_unknown_before_submit_v1'
         order.request_payload = _json(request_payload)
         db.commit()
         try:

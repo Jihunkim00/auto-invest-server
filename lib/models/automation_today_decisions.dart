@@ -191,6 +191,60 @@ class AutomationTodayDecisionSlot {
       status == 'retry_pending' || status == 'deferred';
   bool get isEntryRecoveryBlocked => status == 'blocked';
 
+  String? get executionReasonCode {
+    const reasons = {
+      'unresolved_entry_limit_hit',
+      'position_state_refresh_pending',
+      'position_retry_exit_unresolved',
+      'account_snapshot_unavailable',
+      'scheduler_task_timeout',
+      'gpt_buy_score_below_threshold',
+    };
+    for (final value in [reason, finalFailureReason, orderBlockReason]) {
+      if (value != 'gpt_buy_score_below_threshold' && reasons.contains(value)) {
+        return value;
+      }
+      if (value?.startsWith('account_snapshot_retry_pending_') == true) {
+        return 'account_snapshot_unavailable';
+      }
+    }
+    if ([reason, finalFailureReason, orderBlockReason]
+        .contains('gpt_buy_score_below_threshold')) {
+      return 'gpt_buy_score_below_threshold';
+    }
+    return null;
+  }
+
+  bool get isAiScoreHold =>
+      executionReasonCode == 'gpt_buy_score_below_threshold';
+
+  String? executionReasonLabel({required bool english}) {
+    const ko = {
+      'unresolved_entry_limit_hit': '미완료 매수 주문이 신규 진입 한도를 점유하고 있습니다.',
+      'position_state_refresh_pending': '보유 상태를 다시 확인한 후 이 슬롯의 분석을 재개합니다.',
+      'position_retry_exit_unresolved':
+          '청산 주문 또는 청산 재시도 확인이 끝나지 않아 매수를 차단했습니다.',
+      'account_snapshot_unavailable': '계좌 조회를 완료하지 못해 매수를 차단했습니다.',
+      'scheduler_task_timeout': '스케줄러 제한 시간 안에 작업이 끝나지 않았습니다.',
+      'gpt_buy_score_below_threshold': 'AI 매수 점수가 기준에 미달해 매수를 보류했습니다.',
+    };
+    const en = {
+      'unresolved_entry_limit_hit':
+          'An unresolved BUY occupies the new entry limit.',
+      'position_state_refresh_pending':
+          'This slot resumes after positions are confirmed.',
+      'position_retry_exit_unresolved':
+          'BUY is blocked until the exit order or retry is resolved.',
+      'account_snapshot_unavailable':
+          'BUY is blocked because the account snapshot is unavailable.',
+      'scheduler_task_timeout':
+          'The scheduler task did not finish within its time limit.',
+      'gpt_buy_score_below_threshold':
+          'BUY is on hold because the AI score is below the threshold.',
+    };
+    return (english ? en : ko)[executionReasonCode];
+  }
+
   factory AutomationTodayDecisionSlot.fromJson(Map<String, dynamic> json) {
     final analyses = _candidates(json['analysis_candidates']);
     final summaryCandidates = analyses.isNotEmpty

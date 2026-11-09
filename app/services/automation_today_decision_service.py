@@ -14,6 +14,7 @@ from app.db.models import (
     AutomationProfileBuyReservation,
     AutomationProfileWatchlistItem,
     AutomationProfileWatchlistSnapshot,
+    AutomationSchedulerSlot,
     SignalLog,
     OrderLog,
     TradeRunLog,
@@ -89,6 +90,8 @@ class AutomationTodayDecisionService:
             )
             for slot in configured_slots
         ]
+        decisions = [self._with_scheduler_outcome(db, decision, profile=profile,
+            owner_user_id=owner_user_id, local_date=local_date) for decision in decisions]
         # Keep executions from an earlier schedule separate from today's configuration.
         historical_slots = sorted({
             _run_slot(run) for run in runs
@@ -117,6 +120,27 @@ class AutomationTodayDecisionService:
             'slots': decisions,
             'execution_history': history,
         }
+
+    @staticmethod
+    def _with_scheduler_outcome(db, decision, *, profile, owner_user_id, local_date):
+        account = 'admin' if owner_user_id is None else f'user-{owner_user_id}'
+        key = f"{account}:{profile.get('provider')}:{local_date.isoformat()}:{decision['scheduler_slot']}"
+        row = db.query(AutomationSchedulerSlot).filter_by(
+            slot_key=key, profile_id=_int_or_none(profile.get('id')),
+        ).first()
+        if row is None:
+            return decision
+        result = {**decision, 'scheduler_status': row.status,
+            'execution_reason': row.reason, 'analysis_reason': decision.get('reason')}
+        if row.status in {'failed', 'blocked', 'retry_pending'}:
+            result.update(status=row.status, reason=row.reason)
+        # A score gate is an analysis HOLD even if the executor's generic
+        # blocked status was used. Keep scores and candidate analysis intact.
+        if row.reason == 'gpt_buy_score_below_threshold':
+            result.update(status='analysis_complete', signal_status='hold', action='hold', reason=row.reason)
+        elif row.status == 'HOLD' and decision.get('status') in {'retry_pending', 'no_result'}:
+            result.update(status='analysis_complete', signal_status='hold', action='hold', reason=row.reason)
+        return result
 
     def _schedule(
         self,

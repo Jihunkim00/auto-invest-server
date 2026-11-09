@@ -518,6 +518,7 @@ def _display_status(internal_status: str) -> str:
         "SYNC_FAILED": "Needs manual review",
         "FAILED": "Failed",
         "REJECTED_BY_SAFETY_GATE": "Rejected by safety gate",
+        "LEGACY_ABSENCE_VERIFIED": "Legacy order absent from complete KIS history",
         "CANCELED": "Canceled",
         "CANCELLED": "Canceled",
     }
@@ -531,6 +532,7 @@ def _is_terminal_status(internal_status: str) -> bool:
         "CANCELED",
         "REJECTED",
         "REJECTED_BY_SAFETY_GATE",
+        "LEGACY_ABSENCE_VERIFIED",
         "FAILED",
     }
 

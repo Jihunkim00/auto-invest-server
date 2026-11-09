@@ -4,6 +4,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from app.db.models import OrderLog, TradeRunLog
+from app.services.kis_legacy_order_state import LEGACY_ABSENCE_VERIFIED, verified_legacy_absence
 
 
 FINAL_STATUSES = {
@@ -49,8 +50,11 @@ def daily_entry_counts(db, *, now: datetime, owner_user_id=None, exclude_order_i
             filled += 1
         # Old unresolved orders still reserve capacity. A partial fill is one
         # entry, even when the remaining quantity has not yet been resolved.
-        if (order.id != exclude_order_id and not filled_today
-                and str(order.internal_status or '').upper() not in FINAL_STATUSES):
+        status = str(order.internal_status or '').upper()
+        terminal = status in FINAL_STATUSES
+        if status == LEGACY_ABSENCE_VERIFIED:
+            terminal = verified_legacy_absence(db, order)
+        if order.id != exclude_order_id and not filled_today and not terminal:
             unresolved += 1
     # A run without its authoritative order row cannot prove a fill. Preserve
     # its capacity reservation until reconciliation repairs the missing row.

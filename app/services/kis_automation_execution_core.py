@@ -524,6 +524,9 @@ class KisAutomationExecutionCore:
         guard = {**guard, 'block_reason': reason,
                  'requested_order_owner_user_id': order.owner_user_id}
 
+        from app.services.kis_unsubmitted_order_reconciliation_service import record_pre_submit_abort
+        record_pre_submit_abort(db, order, reason)
+
         order.internal_status = (
             InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
         )

@@ -22,6 +22,8 @@ class PortfolioSummary {
     this.d1Cash,
     this.d2Cash,
     this.cashKnown = true,
+    this.marketValueKnown = true,
+    this.unrealizedPlKnown = true,
     this.balanceUnavailable = false,
     this.positionsUnavailable = false,
     this.openOrdersUnavailable = false,
@@ -72,6 +74,11 @@ class PortfolioSummary {
       totalCostBasis: _readDouble(json['total_cost_basis']),
       totalMarketValue: _readDouble(json['total_market_value']),
       totalUnrealizedPl: _readDouble(json['total_unrealized_pl']),
+      marketValueKnown:
+          _readNullableDouble(json['total_market_value']) != null ||
+              _readNullableDouble(json['stock_evaluation_amount']) != null,
+      unrealizedPlKnown:
+          _readNullableDouble(json['total_unrealized_pl']) != null,
       totalUnrealizedPlpc: _readDouble(json['total_unrealized_plpc']),
       cash: _readDouble(json['cash']),
       positions: rawPositions
@@ -95,7 +102,8 @@ class PortfolioSummary {
       orderableCashSource: _readNullableString(json['orderable_cash_source']),
       d1Cash: _readNullableDouble(json['d1_cash']),
       d2Cash: _readNullableDouble(json['d2_cash']),
-      cashKnown: _readBool(json['cash_known'], true),
+      cashKnown: _readBool(json['cash_known'], true) &&
+          _readNullableDouble(json['cash']) != null,
       balanceUnavailable: _readBool(json['balance_unavailable'], false),
       positionsUnavailable: _readBool(json['positions_unavailable'], false),
       openOrdersUnavailable: _readBool(json['open_orders_unavailable'], false),
@@ -125,6 +133,7 @@ class PortfolioSummary {
             currentPrice: position.currentPrice,
             marketValue: position.marketValue ?? 0,
             unrealizedPl: position.unrealizedPl ?? 0,
+            unrealizedPlKnown: position.unrealizedPl != null,
             unrealizedPlpc: position.unrealizedPlPct ?? 0,
           ),
         )
@@ -189,6 +198,10 @@ class PortfolioSummary {
       d1Cash: account.d1Cash,
       d2Cash: account.d2Cash,
       cashKnown: account.cash != null,
+      marketValueKnown: account.stockEvaluationAmount != null ||
+          snapshot.positions.every((position) => position.marketValue != null),
+      unrealizedPlKnown: account.unrealizedPl != null ||
+          snapshot.positions.every((position) => position.unrealizedPl != null),
       balanceUnavailable: !snapshot.connected,
       positionsUnavailable: !snapshot.connected,
       openOrdersUnavailable: !snapshot.connected,
@@ -215,6 +228,8 @@ class PortfolioSummary {
   final double? d1Cash;
   final double? d2Cash;
   final bool cashKnown;
+  final bool marketValueKnown;
+  final bool unrealizedPlKnown;
   final bool balanceUnavailable;
   final bool positionsUnavailable;
   final bool openOrdersUnavailable;
@@ -240,6 +255,7 @@ class PositionSummary {
     required this.marketValue,
     required this.unrealizedPl,
     required this.unrealizedPlpc,
+    this.unrealizedPlKnown = true,
   });
 
   factory PositionSummary.fromJson(Map<String, dynamic> json) {
@@ -256,6 +272,7 @@ class PositionSummary {
       currentPrice: _readNullableDouble(json['current_price']),
       marketValue: _readDouble(json['market_value']),
       unrealizedPl: _readDouble(json['unrealized_pl']),
+      unrealizedPlKnown: _readNullableDouble(json['unrealized_pl']) != null,
       unrealizedPlpc: _readDouble(json['unrealized_plpc']),
     );
   }
@@ -272,6 +289,7 @@ class PositionSummary {
   final double marketValue;
   final double unrealizedPl;
   final double unrealizedPlpc;
+  final bool unrealizedPlKnown;
 }
 
 class PendingOrderSummary {
