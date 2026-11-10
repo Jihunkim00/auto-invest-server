@@ -13,25 +13,26 @@ import math
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, func, update
+from sqlalchemy import DateTime, func, inspect, or_, update
 
 from app.db.models import (
     AccountBuyExecutionClaim,
     AutomationProfileBuyReservation,
     AutomationSchedulerSlot,
     KisLegacyOrderReconciliation,
+    KisOrderSubmissionEvidence,
     KisOrderValidationLog,
     OrderLog,
     PositionLifecycle,
+    StrategyLiveAutoBuyAttempt,
     TradeRunLog,
     User,
 )
 from app.services.account_trading_limit_service import AccountTradingLimitService
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.kis_legacy_order_state import LEGACY_ABSENCE_VERIFIED, legacy_audit_table_exists
-from app.services.kis_order_account_scope import resolve_order_account_scope
+from app.services.kis_order_account_scope import kis_client_cache_scope, resolve_order_account_scope
 from app.services.kis_order_reconciliation_service import (
-    FIELDS,
     ReconciliationBlocked,
     fingerprint,
     timestamp,
@@ -62,11 +63,33 @@ def _digest(value):
 
 def _contains_submit_marker(value):
     if isinstance(value, dict):
-        return any((key in SUBMIT_MARKERS and item is True) or _contains_submit_marker(item)
+        return any((key in SUBMIT_MARKERS and item not in (False, None))
+                   or (str(key).lower() in {'odno', 'kis_odno', 'broker_order_id'} and bool(item))
+                   or _contains_submit_marker(item)
                    for key, item in value.items())
     if isinstance(value, list):
         return any(_contains_submit_marker(item) for item in value)
     return False
+
+
+def _evidence_payload(value):
+    if value in (None, ''):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        raise ReconciliationBlocked('execution_evidence_unreadable') from None
+    if not isinstance(parsed, dict):
+        raise ReconciliationBlocked('execution_evidence_unreadable')
+    return parsed
+
+
+def _submission_run(row):
+    return (str(row.stage or '').lower() in {'submit', 'submitted', 'sync', 'execution'}
+            or str(row.result or '').lower() in {
+                'submitted', 'accepted', 'pending', 'filled', 'partially_filled',
+                'unknown', 'sync_required', 'timeout',
+            })
 
 
 def _finite_nonnegative(row, key):
@@ -230,13 +253,9 @@ def read_legacy_admin_broker_evidence(db, order, now, *, client):
         for key in ('ord_qty', 'tot_ccld_qty', 'rmn_qty', 'rjct_qty'):
             _finite_nonnegative(row, key)
     try:
-        raw_open_orders = client.list_open_orders()
+        raw_positions, raw_open_orders = client.read_reconciliation_account_snapshot(now=now)
     except Exception:
-        raise ReconciliationBlocked('open_orders_unavailable') from None
-    try:
-        raw_positions = client.list_positions()
-    except Exception:
-        raise ReconciliationBlocked('positions_unavailable') from None
+        raise ReconciliationBlocked('current_account_snapshot_unavailable') from None
     open_orders = _validate_open_orders(raw_open_orders)
     positions = _validate_positions(raw_positions)
     summary = _safe_history_summary(rows)
@@ -244,6 +263,7 @@ def read_legacy_admin_broker_evidence(db, order, now, *, client):
         'provider': 'kis', 'owner_user_id': None,
         'broker_account_id': scope.account.broker_account_id,
         'environment': 'live', 'checked_at': now.isoformat(),
+        'account_scope_digest': kis_client_cache_scope(client),
         'complete': True, 'execution_filter': '00', 'exchange_scope': 'ALL',
         'history_date': day.isoformat(), 'history_page_count': page_count,
         'history_orders': rows, 'history_summary': summary,
@@ -272,7 +292,7 @@ def _nearby_scheduler_trace(db, order, profile_id):
     ).order_by(AutomationSchedulerSlot.id.asc()).all()
     result = []
     for row in rows:
-        payload = _json(row.result_json)
+        payload = _evidence_payload(row.result_json)
         if _contains_submit_marker(payload):
             raise ReconciliationBlocked('broker_submission_marker_present')
         result.append({
@@ -317,6 +337,8 @@ class KisLegacyAdminOrderReconciliationService:
         if (order is None or order.owner_user_id is not None or order.broker != 'kis'
                 or str(order.market or '').upper() != 'KR' or order.side != 'buy'):
             raise ReconciliationBlocked('legacy_admin_buy_scope_required')
+        if order_id != 18 or admin_user_id != 1:
+            raise ReconciliationBlocked('legacy_order18_only')
         account = AccountTradingLimitService.resolve_account(db, require_enabled=False)
         if account.owner_user_id != admin_user_id or not account.legacy_admin:
             raise ReconciliationBlocked('account_scope_mismatch')
@@ -326,33 +348,42 @@ class KisLegacyAdminOrderReconciliationService:
         if not claim_held and db.get(AccountBuyExecutionClaim, account.broker_account_id) is not None:
             raise ReconciliationBlocked('account_buy_in_progress')
         if (order.internal_status != 'REQUESTED' or order.kis_odno or order.broker_order_id
+                or order.broker_status or order.broker_order_status
+                or order.kis_orgn_odno or order.canceled_at is not None
                 or order.submitted_at is not None or order.filled_at is not None
                 or order.filled_qty not in (None, 0)):
             raise ReconciliationBlocked('broker_submission_possible')
         if db.query(PositionLifecycle.id).filter_by(entry_order_id=order.id).first():
             raise ReconciliationBlocked('position_evidence_present')
+        if (inspect(db.get_bind()).has_table('kis_order_submission_evidence')
+                and db.query(KisOrderSubmissionEvidence.id).filter_by(order_id=order.id).first()):
+            raise ReconciliationBlocked('legacy_requires_protocol_specific_review')
         before_fingerprint = fingerprint(order)
         local = self.now()
         profile = _profile_scope(db, order, admin_user_id, local)
         order_created = timestamp(order.created_at)
+        if order_created.astimezone(KST).date().isoformat() != '2026-10-28':
+            raise ReconciliationBlocked('legacy_order_date_mismatch')
         local_window_start = order_created.replace(tzinfo=None) - timedelta(minutes=5)
         local_window_end = order_created.replace(tzinfo=None) + timedelta(minutes=5)
         logs = db.query(TradeRunLog).filter_by(order_id=order.id).order_by(TradeRunLog.id.asc()).all()
         nearby_runs = db.query(TradeRunLog).filter(
             TradeRunLog.owner_user_id.is_(None),
             TradeRunLog.symbol == order.symbol,
-            TradeRunLog.mode == 'automation_scheduler_profile_analysis',
             TradeRunLog.created_at >= local_window_start,
             TradeRunLog.created_at <= local_window_end,
         ).order_by(TradeRunLog.id.asc()).all()
         nearby_runs = [row for row in nearby_runs if (
-            _json(row.request_payload).get('automation_profile_key') == profile['profile_key']
-            or _json(row.request_payload).get('profile_key') == profile['profile_key'])]
+            _evidence_payload(row.request_payload).get('automation_profile_key') == profile['profile_key']
+            or _evidence_payload(row.request_payload).get('profile_key') == profile['profile_key']
+            or _submission_run(row))]
         payloads = [order.request_payload, order.response_payload, order.last_sync_payload]
         payloads.extend(value for row in logs for value in (row.request_payload, row.response_payload))
         payloads.extend(value for row in nearby_runs for value in (row.request_payload, row.response_payload))
-        if any(_contains_submit_marker(_json(value)) for value in payloads):
+        if any(_contains_submit_marker(_evidence_payload(value)) for value in payloads):
             raise ReconciliationBlocked('broker_submission_marker_present')
+        if any(_submission_run(row) for row in [*logs, *nearby_runs]):
+            raise ReconciliationBlocked('execution_submission_possible')
 
         validations = db.query(KisOrderValidationLog).filter(
             KisOrderValidationLog.market == 'KR', KisOrderValidationLog.symbol == order.symbol,
@@ -360,6 +391,20 @@ class KisLegacyAdminOrderReconciliationService:
         ).all()
         related_validations = [row for row in validations
             if abs((timestamp(row.created_at) - order_created).total_seconds()) <= 300]
+        if any(_contains_submit_marker(_evidence_payload(value)) for row in related_validations
+               for value in (row.request_payload, row.response_payload)):
+            raise ReconciliationBlocked('broker_submission_marker_present')
+        linked_reservations, _ = _reservation_rows(db, order.id)
+        attempt_ids = [row.attempt_id for row in linked_reservations if row.attempt_id is not None]
+        attempts = db.query(StrategyLiveAutoBuyAttempt).filter(or_(
+            StrategyLiveAutoBuyAttempt.related_order_id == order.id,
+            StrategyLiveAutoBuyAttempt.id.in_(attempt_ids),
+        )).order_by(StrategyLiveAutoBuyAttempt.id).all()
+        if any(row.broker_order_id or row.submitted_at is not None or row.synced_at is not None
+               or row.status not in {'blocked', 'rejected', 'pending_validation', 'validated'}
+               or any(_contains_submit_marker(_evidence_payload(value))
+                      for value in (row.request_payload, row.response_payload)) for row in attempts):
+            raise ReconciliationBlocked('execution_submission_possible')
         scheduler_rows, scheduler_trace = _nearby_scheduler_trace(db, order, profile['id'])
         evidence = self.read_evidence(db, order, local)
         if (evidence.get('owner_user_id') is not None
@@ -368,7 +413,7 @@ class KisLegacyAdminOrderReconciliationService:
                 or evidence.get('selected_profile') != profile):
             raise ReconciliationBlocked('evidence_scope_mismatch')
         try:
-            age = (local - timestamp(evidence['checked_at'])).total_seconds()
+            age = (self.now() - timestamp(evidence['checked_at'])).total_seconds()
         except (KeyError, TypeError, ValueError):
             raise ReconciliationBlocked('evidence_timestamp_invalid') from None
         if not -2 <= age <= 60:
@@ -381,6 +426,8 @@ class KisLegacyAdminOrderReconciliationService:
                 or evidence.get('positions_reliable') is not True
                 or evidence.get('open_orders_reliable') is not True):
             raise ReconciliationBlocked('evidence_incomplete')
+        if not isinstance(evidence.get('account_scope_digest'), str) or len(evidence['account_scope_digest']) != 64:
+            raise ReconciliationBlocked('account_identity_unverified')
         history = evidence.get('history_orders')
         open_orders = evidence.get('open_orders')
         positions = evidence.get('positions')
@@ -389,16 +436,37 @@ class KisLegacyAdminOrderReconciliationService:
         symbol = str(order.symbol).strip()
         if any(str(row.get('pdno') or '').strip() == symbol for row in history):
             raise ReconciliationBlocked('broker_submission_possible')
-        if any(str(row.get('symbol') or '').strip() == symbol for row in open_orders):
+        if open_orders:
             raise ReconciliationBlocked('broker_submission_possible')
         if any(str(row.get('symbol') or row.get('pdno') or '').strip() == symbol for row in positions):
             raise ReconciliationBlocked('broker_submission_possible')
 
         reservations, reservation_values = _reservation_rows(db, order.id)
+        request = _evidence_payload(order.request_payload)
+        if (request.get('reservation_id') != 10 or len(reservations) != 1
+                or reservations[0].id != 10
+                or reservations[0].provider != 'kis' or reservations[0].market != 'KR'
+                or reservations[0].symbol != order.symbol
+                or reservations[0].profile_key != profile['profile_key']
+                or reservations[0].trade_date_kst != day
+                or reservations[0].reservation_key != request.get('reservation_key')):
+            raise ReconciliationBlocked('legacy_reservation_scope_mismatch')
         if any(row.status not in {'reserved', 'blocked'} for row in reservations):
             raise ReconciliationBlocked('reservation_submission_possible')
         related_trace = {
             'order_linked_trade_run_count': len(logs),
+            'order_linked_trade_runs': [{
+                'id': row.id, 'mode': row.mode, 'stage': row.stage,
+                'result': row.result, 'reason': row.reason,
+                'request_digest': _digest(_evidence_payload(row.request_payload)),
+                'response_digest': _digest(_evidence_payload(row.response_payload)),
+            } for row in logs],
+            'order_linked_buy_attempts': [{
+                'id': row.id, 'status': row.status,
+                'request_digest': _digest(_evidence_payload(row.request_payload)),
+                'response_digest': _digest(_evidence_payload(row.response_payload)),
+            } for row in attempts],
+            'submission_journal_count': 0,
             'nearby_profile_analysis_count': len(nearby_runs),
             'nearby_profile_analysis_records': [{
                 'id': row.id, 'mode': row.mode, 'stage': row.stage,
@@ -430,6 +498,7 @@ class KisLegacyAdminOrderReconciliationService:
             'positions': evidence['positions'],
             'selected_profile': profile,
             'account': account.broker_account_id,
+            'account_scope_digest': evidence['account_scope_digest'],
             'local_trace': related_trace,
         })
         safe_history = _safe_history_summary(history)
@@ -447,7 +516,10 @@ class KisLegacyAdminOrderReconciliationService:
                 'filled_qty': order.filled_qty,
             },
             'selected_profile': profile,
+            'account_scope_digest': evidence['account_scope_digest'],
             'original_fingerprint': before_fingerprint,
+            'order_snapshot_digest': _digest({column.name: getattr(order, column.name)
+                                             for column in order.__table__.columns}),
             'reservation_fingerprint': _digest(reservation_values),
             'reservations': [{
                 'id': row.id, 'order_id': row.order_id, 'symbol': row.symbol,
@@ -481,7 +553,7 @@ class KisLegacyAdminOrderReconciliationService:
         self._admin(db, admin_user_id)
         if not legacy_audit_table_exists(db):
             raise ReconciliationBlocked('legacy_reconciliation_schema_missing')
-        if (not approval_reference or len(str(approval_reference).strip()) > 160
+        if (not str(approval_reference or '').strip() or len(str(approval_reference).strip()) > 160
                 or approval_digest != _approval_digest(plan)
                 or approval_digest != plan.get('approval_digest')):
             raise ReconciliationBlocked('explicit_plan_approval_required')
@@ -500,8 +572,8 @@ class KisLegacyAdminOrderReconciliationService:
                 if db.query(KisLegacyOrderReconciliation.id).filter_by(order_id=order.id).first():
                     raise ReconciliationBlocked('legacy_reconciliation_already_applied')
                 predicates = []
-                for field in FIELDS:
-                    column, value = getattr(OrderLog, field), before[field]
+                for column in OrderLog.__table__.columns:
+                    value = getattr(order, column.name)
                     predicates.append(column.is_(None) if value is None else
                         func.julianday(column) == func.julianday(value)
                         if isinstance(column.type, DateTime) else column == value)

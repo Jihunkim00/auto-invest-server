@@ -75,7 +75,12 @@ def main():
                 lambda session, order, now: read_legacy_admin_broker_evidence(
                     session, order, now, client=client))
             if args.apply_plan:
-                plan = json.loads(args.apply_plan.read_text(encoding='utf-8'))
+                document = json.loads(args.apply_plan.read_text(encoding='utf-8'))
+                if not isinstance(document, dict):
+                    raise ReconciliationBlocked('plan_scope_mismatch')
+                plan = document.get('plan', document)
+                if not isinstance(plan, dict):
+                    raise ReconciliationBlocked('plan_scope_mismatch')
                 if plan.get('order_id') != 18 or plan.get('protocol') != 'legacy_admin_broker_absence_v1':
                     raise ReconciliationBlocked('plan_scope_mismatch')
                 result = service.apply(db, plan=plan, admin_user_id=1,
@@ -91,8 +96,6 @@ def main():
     except ReconciliationBlocked as exc:
         payload = {'mode': 'blocked', 'reason': str(exc),
                    'new_broker_mutation_calls': 0}
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return 2
     except Exception:
         payload = {'mode': 'blocked', 'reason': 'legacy_review_unavailable',
                    'new_broker_mutation_calls': 0}
@@ -109,7 +112,7 @@ def main():
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(encoded + '\n', encoding='utf-8')
     print(encoded)
-    return 0
+    return 2 if payload['mode'] == 'blocked' else 0
 
 
 if __name__ == '__main__':

@@ -84,6 +84,25 @@ def read_execution_page(*, credentials, get_token, send_get, budget,
         'ORD_GNO_BRNO': '', 'ODNO': '', 'EXCG_ID_DVSN_CD': 'ALL',
         'CTX_AREA_FK100': fk, 'CTX_AREA_NK100': nk,
     }
+    return read_account_page(credentials=credentials, get_token=get_token,
+        send_get=send_get, budget=budget, path=PATH,
+        tr_id=TR_IDS[(environment, older)], params=params,
+        continuation=continuation, rows_key='output1')
+
+
+def read_account_page(*, credentials, get_token, send_get, budget, path,
+                      tr_id, params, continuation='', rows_key='output1'):
+    """Strict account GET transport; preserve headers needed to prove completeness."""
+    if path not in {PATH, '/uapi/domestic-stock/v1/trading/inquire-balance',
+                    '/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl'}:
+        raise ExecutionHistoryError('incomplete', 'invalid_read_endpoint')
+    environment = execution_environment(credentials.get('environment'))
+    account, product = str(credentials.get('account_no') or ''), str(credentials.get('account_product_code') or '')
+    if (environment not in BASE_URLS or len(account) != 8 or not account.isdigit()
+            or len(product) != 2 or not product.isdigit()
+            or not credentials.get('app_key') or not credentials.get('app_secret')
+            or params.get('CANO') != account or params.get('ACNT_PRDT_CD') != product):
+        raise ExecutionHistoryError('not_connected', 'account_not_configured')
     for attempt in range(2):
         budget.remaining()
         token = get_token(attempt == 1)
@@ -92,10 +111,10 @@ def read_execution_page(*, credentials, get_token, send_get, budget,
             'charset': 'UTF-8', 'custtype': 'P',
             'appkey': credentials['app_key'], 'appsecret': credentials['app_secret'],
             'authorization': f'Bearer {token}',
-            'tr_id': TR_IDS[(environment, older)], 'tr_cont': continuation,
+            'tr_id': tr_id, 'tr_cont': continuation,
         }
         try:
-            response = send_get(BASE_URLS[environment] + PATH, params=params,
+            response = send_get(BASE_URLS[environment] + path, params=params,
                                 headers=headers, timeout=budget.take())
             payload = response.json()
         except ExecutionHistoryError:
@@ -113,7 +132,7 @@ def read_execution_page(*, credentials, get_token, send_get, budget,
             raise ExecutionHistoryError('authentication_failed', 'broker_authentication_failed')
         if getattr(response, 'status_code', 500) >= 400 or str(payload.get('rt_cd')) != '0':
             raise ExecutionHistoryError()
-        rows = payload.get('output1')
+        rows = payload.get(rows_key)
         response_headers = {str(k).lower(): v for k, v in (getattr(response, 'headers', None) or {}).items()}
         flag = str(response_headers.get('tr_cont', '')).strip().upper()
         if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)

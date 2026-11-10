@@ -12,10 +12,12 @@ from app.db.models import (
     AutomationSchedulerSlot,
     KisLegacyOrderReconciliation,
     KisOrderValidationLog,
+    KisOrderSubmissionEvidence,
     OrderLog,
     PositionExitRetryJob,
     PositionLifecycle,
     RuntimeSetting,
+    StrategyLiveAutoBuyAttempt,
     TradeRunLog,
     User,
 )
@@ -48,6 +50,7 @@ class FakeBroker:
         self.result = {
             'provider': 'kis', 'owner_user_id': None, 'broker_account_id': 'admin:kis:KR',
             'environment': 'live', 'checked_at': NOW.isoformat(), 'complete': True,
+            'account_scope_digest': 'a' * 64,
             'execution_filter': '00', 'exchange_scope': 'ALL', 'history_date': '2026-10-28',
             'history_page_count': 1, 'history_orders': [],
             'history_summary': {'order_count': 0, 'status_counts': {}},
@@ -67,6 +70,9 @@ class FakeBroker:
 
     def list_open_orders(self):
         return []
+
+    def read_reconciliation_account_snapshot(self, *, now):
+        return self.list_positions(), self.list_open_orders()
 
 
 def configure_profile(monkeypatch, profile=None):
@@ -111,8 +117,8 @@ def setup(db, monkeypatch, *, profile=None):
             'reservation_key': 'admin:old:036460',
         }), response_payload='{}', last_sync_payload='{}',
     )
-    order13 = OrderLog(id=13, owner_user_id=None, broker='kis', market='KR', symbol='036460',
-        side='sell', order_type='market', qty=7, requested_qty=7,
+    order13 = OrderLog(id=13, owner_user_id=2, broker='kis', market='KR', symbol='028670',
+        side='buy', order_type='market', qty=7, requested_qty=7,
         internal_status='UNKNOWN_STALE', created_at=datetime(2026, 10, 20, 2, 23),
         request_payload='{}', response_payload='{}', last_sync_payload='{}')
     order19 = OrderLog(id=19, owner_user_id=2, broker='kis', market='KR', symbol='036460',
@@ -149,7 +155,7 @@ def test_real_order18_clone_review_and_approved_recovery_releases_both_limits(db
     untouched = {13: fingerprint(order13), 19: fingerprint(order19)}
     assert daily_entry_counts(db, now=NOW) == (0, 1)
     assert daily_entry_counts(db, now=NOW, owner_user_id=1) == (0, 0)
-    assert daily_entry_counts(db, now=NOW, owner_user_id=2) == (0, 1)
+    assert daily_entry_counts(db, now=NOW, owner_user_id=2) == (0, 2)
     assert account_pending_amount(db) == 258300
 
     plan = service.propose(db, order_id=18, admin_user_id=1)
@@ -173,7 +179,7 @@ def test_real_order18_clone_review_and_approved_recovery_releases_both_limits(db
     assert db.get(OrderLog, 18).broker_status is None
     assert db.get(OrderLog, 18).broker_order_status is None
     assert daily_entry_counts(db, now=NOW) == (0, 0)
-    assert daily_entry_counts(db, now=NOW, owner_user_id=2) == (0, 1)
+    assert daily_entry_counts(db, now=NOW, owner_user_id=2) == (0, 2)
     assert account_pending_amount(db) == 0
     assert db.get(AutomationProfileBuyReservation, 10).status == 'blocked'
     assert db.get(AutomationProfileBuyReservation, 10).block_reason == 'legacy_broker_order_absence_verified'
@@ -269,7 +275,7 @@ def test_admin_and_test01_are_isolated(db_session, monkeypatch):
         service.propose(db, order_id=18, admin_user_id=2)
     with pytest.raises(ReconciliationBlocked, match='legacy_admin_buy_scope_required'):
         service.propose(db, order_id=19, admin_user_id=1)
-    assert daily_entry_counts(db, now=NOW, owner_user_id=2) == (0, 1)
+    assert daily_entry_counts(db, now=NOW, owner_user_id=2) == (0, 2)
     assert db.get(OrderLog, 13).internal_status == 'UNKNOWN_STALE'
     assert db.get(OrderLog, 19).internal_status == 'UNKNOWN_STALE'
 
@@ -291,6 +297,8 @@ def test_history_adapter_reads_all_pages_and_all_status_filter(db_session, monke
         'sll_buy_dvsn_cd': '02', 'ord_qty': '1', 'tot_ccld_qty': '0', 'rmn_qty': '1',
         'rjct_qty': '0', 'cncl_yn': 'N'}
     class FakeKisClient:
+        settings = SimpleNamespace(kis_env='live', kis_account_no='11112222',
+            kis_account_product_code='01', kis_app_key='fake', kis_app_secret='fake')
         def __init__(self): self.calls = []
         def inquire_account_executions_page(self, **kwargs):
             self.calls.append(kwargs)
@@ -299,6 +307,7 @@ def test_history_adapter_reads_all_pages_and_all_status_filter(db_session, monke
             return {'orders': [filled_sell, open_buy], 'tr_cont': 'D', 'fk': '', 'nk': ''}
         def list_open_orders(self): return []
         def list_positions(self): return []
+        def read_reconciliation_account_snapshot(self, *, now): return [], []
     client = FakeKisClient()
     evidence = read_legacy_admin_broker_evidence(db, db.get(OrderLog, 18), NOW, client=client)
     assert evidence['complete'] is True
@@ -414,4 +423,165 @@ def test_preflight_malformed_broker_snapshot_is_not_reliable(db_session, monkeyp
     assert report['kis']['positions_reliability'] == 'UNKNOWN'
     assert 'account_snapshot_unavailable' in report['reason_codes']
     assert report['status'] != 'READY'
+
+
+@pytest.mark.parametrize('change,reason', [
+    ('run_without_marker', 'execution_submission_possible'),
+    ('malformed_log', 'execution_evidence_unreadable'),
+    ('broker_response', 'broker_submission_marker_present'),
+    ('string_submit_marker', 'broker_submission_marker_present'),
+    ('reservation_missing', 'legacy_reservation_scope_mismatch'),
+    ('reservation_wrong_profile', 'legacy_reservation_scope_mismatch'),
+    ('unrelated_open_order', 'broker_submission_possible'),
+    ('nearby_unlinked_submit', 'execution_submission_possible'),
+    ('attempt_with_broker_id', 'execution_submission_possible'),
+    ('submission_journal', 'legacy_requires_protocol_specific_review'),
+])
+def test_legacy_rejects_ambiguous_execution_and_reservation_scope(db_session, monkeypatch, change, reason):
+    db = db_session
+    service, broker, _, _ = setup(db, monkeypatch)
+    if change == 'run_without_marker':
+        db.add(TradeRunLog(run_key='uncertain-submit', order_id=18, stage='submit',
+            result='unknown', trigger_source='execution_core', symbol='036460'))
+    elif change == 'malformed_log':
+        db.get(OrderLog, 18).response_payload = '{broken'
+    elif change == 'broker_response':
+        db.get(OrderLog, 18).response_payload = json.dumps({'output': {'ODNO': 'FAKE-18'}})
+    elif change == 'string_submit_marker':
+        db.get(OrderLog, 18).response_payload = json.dumps({'submit_attempted': 'true'})
+    elif change == 'reservation_missing':
+        db.delete(db.get(AutomationProfileBuyReservation, 10))
+    elif change == 'reservation_wrong_profile':
+        db.get(AutomationProfileBuyReservation, 10).profile_key = 'test01'
+    elif change == 'nearby_unlinked_submit':
+        db.add(TradeRunLog(run_key='unlinked-submit', trigger_source='execution_core',
+            symbol='036460', mode='automation_profile_scheduler_buy', stage='submit',
+            result='unknown', created_at=datetime(2026, 10, 28, 2, 23, 2)))
+    elif change == 'attempt_with_broker_id':
+        db.add(StrategyLiveAutoBuyAttempt(related_order_id=18, broker_order_id='FAKE-18', status='submitted'))
+    elif change == 'submission_journal':
+        db.add(KisOrderSubmissionEvidence(order_id=18, order_fingerprint=fingerprint(db.get(OrderLog, 18)),
+            kind='dispatch_started', protocol='future-protocol', source='execution_core', reason='uncertain'))
+    else:
+        broker.result['open_orders'] = [{'order_id': 'UNACCOUNTED', 'symbol': '005930',
+            'side': 'buy', 'unfilled_qty': 1}]
+    db.commit()
+    original = fingerprint(db.get(OrderLog, 18))
+    with pytest.raises(ReconciliationBlocked, match=reason):
+        service.propose(db, order_id=18, admin_user_id=1)
+    assert fingerprint(db.get(OrderLog, 18)) == original
+    assert daily_entry_counts(db, now=NOW) == (0, 1)
+
+
+@pytest.mark.parametrize('change', ['account', 'reservation', 'order', 'notional', 'broker'])
+def test_approval_rechecks_account_fingerprint_reservation_and_broker(db_session, monkeypatch, change):
+    db = db_session
+    service, broker, _, _ = setup(db, monkeypatch)
+    plan = service.propose(db, order_id=18, admin_user_id=1)
+    if change == 'account':
+        broker.result['account_scope_digest'] = 'b' * 64
+    elif change == 'reservation':
+        db.get(AutomationProfileBuyReservation, 10).block_reason = 'changed_during_review'
+    elif change == 'order':
+        db.get(OrderLog, 18).remaining_qty = 6
+    elif change == 'notional':
+        db.get(OrderLog, 18).notional = 258301
+    else:
+        broker.result['complete'] = False
+    db.commit()
+    original = fingerprint(db.get(OrderLog, 18))
+    with pytest.raises(ReconciliationBlocked):
+        service.apply(db, plan=plan, admin_user_id=1,
+            approval_digest=plan['approval_digest'], approval_reference='TEST-REVALIDATION')
+    assert fingerprint(db.get(OrderLog, 18)) == original
+    assert daily_entry_counts(db, now=NOW) == (0, 1)
+    assert account_pending_amount(db) == (258301 if change == 'notional' else 258300)
+    assert db.query(KisLegacyOrderReconciliation).count() == 0
+    assert db.query(AccountBuyExecutionClaim).count() == 0
+
+
+def test_cli_review_file_can_be_applied_without_rewriting_json(db_session, monkeypatch, tmp_path, capsys):
+    from hashlib import sha256
+    import sqlite3
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from scripts import reconcile_admin_legacy_kis_order as cli
+
+    db = db_session
+    _, broker, _, _ = setup(db, monkeypatch)
+    path = tmp_path / 'isolated.db'
+    with sqlite3.connect(path) as copied:
+        db.connection().connection.driver_connection.backup(copied)
+    db.rollback()
+    review_file = tmp_path / 'review.json'
+    monkeypatch.setattr(cli, 'get_settings', lambda: SimpleNamespace(
+        database_url='sqlite:///' + path.as_posix(), kis_env='live'))
+    monkeypatch.setattr(cli, 'KisClient', lambda *args: broker)
+    monkeypatch.setattr(cli, 'read_legacy_admin_broker_evidence',
+        lambda db, order, now, *, client: broker(db, order, now))
+    original_hash = sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr('sys.argv', ['reconcile', '--output', str(review_file)])
+    assert cli.main() == 0
+    review = json.loads(review_file.read_text(encoding='utf-8'))
+    assert review['mode'] == 'review_only'
+    assert sha256(path.read_bytes()).hexdigest() == original_hash
+    args = ['reconcile', '--apply-plan', str(review_file),
+        '--approve-digest', review['plan']['approval_digest'], '--approval-reference', 'TEST-CLI-ONLY']
+    monkeypatch.setattr('sys.argv', args)
+    assert cli.main() == 0
+    engine = create_engine('sqlite:///' + path.as_posix())
+    with Session(engine) as verified:
+        assert daily_entry_counts(verified, now=NOW) == (0, 0)
+        assert verified.get(AutomationProfileBuyReservation, 10).status == 'blocked'
+    engine.dispose()
+    # Duplicate execution produces a persisted failure report and a nonzero exit.
+    monkeypatch.setattr('sys.argv', args + ['--output', str(tmp_path / 'duplicate.json')])
+    assert cli.main() == 2
+    assert json.loads((tmp_path / 'duplicate.json').read_text())['mode'] == 'blocked'
+
+
+def test_preflight_unresolved_admin_sell_blocks_even_with_entry_capacity(db_session, monkeypatch):
+    db = db_session
+    service, broker, _, _ = setup(db, monkeypatch)
+    import app.services.admin_preflight_service as preflight_module
+    monkeypatch.setattr(preflight_module, 'resolve_position_account_scope', lambda *args, **kwargs: None)
+    broker.settings = SimpleNamespace(kis_env='live')
+    plan = service.propose(db, order_id=18, admin_user_id=1)
+    service.apply(db, plan=plan, admin_user_id=1,
+        approval_digest=plan['approval_digest'], approval_reference='TEST-LOCAL-SELL')
+    db.add(OrderLog(id=30, owner_user_id=None, broker='kis', market='KR', symbol='005930',
+        side='sell', qty=1, order_type='market', internal_status='UNKNOWN_STALE'))
+    db.commit()
+    report = check_admin_preflight(db, target_date=date(2026, 11, 9), now=NOW,
+        kis_client=broker, scheduler_health={'scheduler_health_status': 'healthy'})
+    assert report['entry_capacity']['remaining_entry_capacity'] == 1
+    assert report['status'] == 'BLOCKED'
+    assert 'duplicate_open_sell_order' in report['reason_codes']
+
+
+@pytest.mark.parametrize('flag,cursor', [('M', ('same', 'same')), ('?', ('', '')), ('M', ('', 'next'))])
+def test_legacy_history_cannot_complete_with_bad_continuation(db_session, monkeypatch, flag, cursor):
+    db = db_session
+    setup(db, monkeypatch)
+    client = SimpleNamespace(inquire_account_executions_page=lambda **kwargs: {
+        'orders': [], 'tr_cont': flag, 'fk': cursor[0], 'nk': cursor[1]})
+    with pytest.raises(ReconciliationBlocked, match='history_incomplete'):
+        read_legacy_admin_broker_evidence(db, db.get(OrderLog, 18), NOW, client=client)
+
+
+def test_preflight_does_not_report_ready_after_all_scheduled_slots(db_session, monkeypatch):
+    db = db_session
+    service, broker, _, _ = setup(db, monkeypatch)
+    import app.services.admin_preflight_service as preflight_module
+    monkeypatch.setattr(preflight_module, 'resolve_position_account_scope', lambda *args, **kwargs: None)
+    broker.settings = SimpleNamespace(kis_env='live')
+    plan = service.propose(db, order_id=18, admin_user_id=1)
+    service.apply(db, plan=plan, admin_user_id=1,
+        approval_digest=plan['approval_digest'], approval_reference='TEST-SLOTS-EXHAUSTED')
+    report = check_admin_preflight(db, target_date=date(2026, 11, 10),
+        now=datetime(2026, 11, 10, 5, tzinfo=UTC), kis_client=broker,
+        scheduler_health={'scheduler_health_status': 'healthy'})
+    assert report['entry_capacity']['remaining_entry_capacity'] == 1
+    assert report['status'] == 'BLOCKED'
+    assert 'no_remaining_analysis_slot' in report['reason_codes']
 

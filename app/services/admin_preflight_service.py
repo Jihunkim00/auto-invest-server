@@ -14,8 +14,9 @@ from app.db.models import (
 )
 from app.services.account_trading_limit_service import AccountTradingLimitService
 from app.services.automation_profile_service import AutomationProfileService
+from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.services.kis_daily_entry_accounting import daily_entry_counts
-from app.services.kis_order_account_scope import resolve_position_account_scope
+from app.services.kis_order_account_scope import position_management_block_reason, resolve_position_account_scope
 from app.services.runtime_setting_service import RuntimeSettingService
 
 KST = ZoneInfo('Asia/Seoul')
@@ -26,9 +27,8 @@ def _normalize_env(value):
     return {'real': 'live', 'prod': 'live', 'vps': 'paper', 'demo': 'paper', 'mock': 'paper'}.get(value, value)
 
 
-def _safe_broker_snapshot(client):
-    positions = client.list_positions()
-    open_orders = client.list_open_orders()
+def _safe_broker_snapshot(client, now):
+    positions, open_orders = client.read_reconciliation_account_snapshot(now=now)
     if not isinstance(positions, list) or any(not isinstance(row, dict) for row in positions):
         raise ValueError('account_snapshot_unavailable')
     if not isinstance(open_orders, list) or any(not isinstance(row, dict) for row in open_orders):
@@ -79,6 +79,8 @@ def check_admin_preflight(db, *, target_date, now, kis_client, scheduler_health=
             or str(profile.get('provider') or '').lower() != 'kis'
             or str(profile.get('market') or '').upper() != 'KR'):
         reasons.append('selected_profile_scope_mismatch')
+    elif profile.get('enabled') is not True or profile.get('status') not in {'active', 'scheduled'}:
+        reasons.append('selected_profile_inactive')
 
     schedule_times = []
     if isinstance(profile.get('entry'), dict):
@@ -95,12 +97,30 @@ def check_admin_preflight(db, *, target_date, now, kis_client, scheduler_health=
 
     positions, open_orders = None, None
     auth_status = 'UNKNOWN'
+    read_error = None
+    read_stage = 'account_scope'
+    scope = None
     try:
-        resolve_position_account_scope(db, client=kis_client)
-        positions, open_orders = _safe_broker_snapshot(kis_client)
+        scope = resolve_position_account_scope(db, client=kis_client)
+        read_stage = 'complete_account_snapshot'
+        positions, open_orders = _safe_broker_snapshot(kis_client, now)
         auth_status = 'authenticated_by_successful_account_reads'
-    except Exception:
+    except Exception as exc:
         unknown.append('account_snapshot_unavailable')
+        code = getattr(exc, 'code', str(exc))
+        read_error = {'stage': read_stage, 'reason': code if code in {
+            'account_scope_unavailable', 'account_scope_mismatch', 'account_disabled',
+            'account_not_configured', 'broker_read_failed', 'broker_authentication_failed',
+            'read_deadline_exceeded', 'call_budget_exceeded', 'invalid_response_shape',
+            'invalid_continuation_response', 'response_scope_mismatch', 'live_account_required',
+        } else 'broker_read_failed'}
+    try:
+        priority = position_management_block_reason(db, owner_user_id=None,
+            scope=scope)
+        if priority:
+            reasons.append(priority)
+    except Exception:
+        unknown.append('position_management_scope_unavailable')
 
     if positions is None or open_orders is None:
         position_count = open_order_count = None
@@ -149,6 +169,9 @@ def check_admin_preflight(db, *, target_date, now, kis_client, scheduler_health=
         reasons.append('account_buy_in_progress')
 
     runtime = RuntimeSettingService().get_settings_read_only(db)
+    authority = AutomationExecutionAuthorityService().snapshot(db)
+    if authority.get('broker_submit_allowed') is not True:
+        reasons.append('execution_authority_blocked')
     runtime_flags = {
         key: runtime.get(key) for key in (
             'bot_enabled', 'dry_run', 'kill_switch', 'scheduler_enabled',
@@ -178,6 +201,10 @@ def check_admin_preflight(db, *, target_date, now, kis_client, scheduler_health=
 
     if target_date > now_kst.date():
         unknown.append('future_account_state_not_observed')
+    elif target_date < now_kst.date():
+        unknown.append('historical_account_state_not_observed')
+    elif schedule_times and not any(value > now_kst.strftime('%H:%M') for value in schedule_times):
+        reasons.append('no_remaining_analysis_slot')
 
     reason_codes = list(dict.fromkeys(reasons + unknown))
     status = 'BLOCKED' if reasons else 'UNKNOWN' if unknown else 'READY'
@@ -195,6 +222,7 @@ def check_admin_preflight(db, *, target_date, now, kis_client, scheduler_health=
             'source': 'injected_live_scheduler_health' if health else 'unavailable_in_standalone_cli'},
         'environment': env.upper() if env else 'UNKNOWN',
         'kis': {'authentication': auth_status,
+            'read_error': read_error,
             'positions_reliability': position_reliability,
             'open_orders_reliability': open_order_reliability,
             'position_count': position_count, 'open_order_count': open_order_count},
@@ -205,6 +233,8 @@ def check_admin_preflight(db, *, target_date, now, kis_client, scheduler_health=
         'active_exit_retries': active_retry_count,
         'account_buy_execution_claim': claim is not None,
         'runtime_safety_settings': runtime_flags,
+        'execution_authority': {key: authority.get(key) for key in (
+            'execution_authority', 'automation_mode', 'scheduler_allowed', 'broker_submit_allowed')},
         'profile_safety_settings': {
             'min_entry_score': (entry.get('min_final_score') if isinstance(entry, dict) else None),
             'cash_only': ((profile.get('settings', {}).get('capital') or {}).get('cash_only')

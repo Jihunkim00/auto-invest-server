@@ -818,6 +818,11 @@ class KisClient:
             send_get=requests.get, budget=budget, **query,
         )
 
+    def read_reconciliation_account_snapshot(self, *, now):
+        from app.brokers.kis_admin_account_snapshot_reader import read_admin_account_snapshot
+
+        return read_admin_account_snapshot(self, now=now)
+
     def inquire_daily_order_executions(
         self,
         *,
