@@ -43,6 +43,20 @@ class AutomationTodayDecisions {
   bool get hasProfile => profileId != null;
   bool get isLoadedForToday => tradeDateKst.isNotEmpty;
 
+  List<AutomationTodayDecisionSlot> get executedSlots => slots
+      .where((slot) =>
+          !slot.isPending &&
+          (slot.status != 'no_result' ||
+              slot.createdAt != null ||
+              slot.schedulerFinishedAt != null))
+      .toList()
+    ..sort((a, b) {
+      final compared = b.resultEpoch.compareTo(a.resultEpoch);
+      return compared != 0
+          ? compared
+          : b.schedulerSlot.compareTo(a.schedulerSlot);
+    });
+
   factory AutomationTodayDecisions.fromJson(Map<String, dynamic> json) {
     final rawSlots = json['slots'];
     return AutomationTodayDecisions(
@@ -123,6 +137,12 @@ class AutomationTodayDecisionSlot {
     this.orderStatus = 'NOT SUBMITTED',
     this.fillStatus,
     this.orderBlockReason,
+    this.schedulerStatus,
+    this.schedulerReason,
+    this.analysisReason,
+    this.scheduledAt,
+    this.schedulerFinishedAt,
+    this.schedulerOutcomeApplied = true,
   });
 
   final String schedulerSlot;
@@ -170,6 +190,21 @@ class AutomationTodayDecisionSlot {
   final String orderStatus;
   final String? fillStatus;
   final String? orderBlockReason;
+  final String? schedulerStatus;
+  final String? schedulerReason;
+  final String? analysisReason;
+  final String? scheduledAt;
+  final String? schedulerFinishedAt;
+  final bool schedulerOutcomeApplied;
+
+  int get resultEpoch =>
+      DateTime.tryParse(createdAt ??
+              createdAtKst ??
+              schedulerFinishedAt ??
+              scheduledAt ??
+              '')
+          ?.millisecondsSinceEpoch ??
+      0;
 
   List<Candidate> get auditCandidates =>
       scoreGateCandidates.isNotEmpty ? scoreGateCandidates : analysisCandidates;
@@ -178,7 +213,7 @@ class AutomationTodayDecisionSlot {
       hasAnalysisResult && (symbol?.trim().isNotEmpty ?? false);
   bool get isFailed => status == 'failed';
   bool get hasAnalysisResult =>
-      status == 'result' || status == 'analysis_complete';
+      status == 'result' || status == 'analysis_complete' || isAnalysisHold;
   bool get isQuantHold =>
       status == 'analysis_complete' &&
       gptTargetSymbols.isEmpty &&
@@ -188,31 +223,49 @@ class AutomationTodayDecisionSlot {
       finalCandidateSymbols.isEmpty;
   bool get isPending => status == 'analysis_pending';
   bool get isPositionRefreshPending =>
-      status == 'retry_pending' || status == 'deferred';
+      (status == 'retry_pending' || status == 'deferred') &&
+      hasPositionOrEntryBlock;
   bool get isEntryRecoveryBlocked => status == 'blocked';
 
+  bool get isAnalysisHold =>
+      isAiScoreHold ||
+      const {
+        'no_gpt_completed_execution_candidate',
+        'no_completed_gpt_final_candidate',
+      }.contains(executionReasonCode);
+
+  bool get isScheduleComplete =>
+      executionReasonCode == 'no_remaining_analysis_slot';
+
+  bool get hasPositionOrEntryBlock => const {
+        'unresolved_entry_limit_hit',
+        'position_state_refresh_pending',
+        'position_retry_exit_unresolved',
+        'account_snapshot_unavailable',
+        'position_state_unavailable_after_entry_slot_grace',
+      }.contains(executionReasonCode);
+
   String? get executionReasonCode {
-    const reasons = {
+    const executionBlocks = {
       'unresolved_entry_limit_hit',
       'position_state_refresh_pending',
       'position_retry_exit_unresolved',
       'account_snapshot_unavailable',
       'scheduler_task_timeout',
-      'gpt_buy_score_below_threshold',
+      'position_state_unavailable_after_entry_slot_grace',
     };
-    for (final value in [reason, finalFailureReason, orderBlockReason]) {
-      if (value != 'gpt_buy_score_below_threshold' && reasons.contains(value)) {
-        return value;
-      }
-      if (value?.startsWith('account_snapshot_retry_pending_') == true) {
-        return 'account_snapshot_unavailable';
-      }
+    // A linked order's explicit execution block is independent of its AI score.
+    if (executionBlocks.contains(orderBlockReason) &&
+        !const {'FILLED', 'SIMULATED'}.contains(orderStatus)) {
+      return orderBlockReason;
     }
-    if ([reason, finalFailureReason, orderBlockReason]
-        .contains('gpt_buy_score_below_threshold')) {
-      return 'gpt_buy_score_below_threshold';
+    final primary = _nullableString(reason) ??
+        _nullableString(finalFailureReason) ??
+        _nullableString(orderBlockReason);
+    if (primary?.startsWith('account_snapshot_retry_pending_') == true) {
+      return 'account_snapshot_unavailable';
     }
-    return null;
+    return primary;
   }
 
   bool get isAiScoreHold =>
@@ -220,15 +273,25 @@ class AutomationTodayDecisionSlot {
 
   String? executionReasonLabel({required bool english}) {
     const ko = {
-      'unresolved_entry_limit_hit': '미완료 매수 주문이 신규 진입 한도를 점유하고 있습니다.',
-      'position_state_refresh_pending': '보유 상태를 다시 확인한 후 이 슬롯의 분석을 재개합니다.',
-      'position_retry_exit_unresolved':
-          '청산 주문 또는 청산 재시도 확인이 끝나지 않아 매수를 차단했습니다.',
+      'no_gpt_completed_execution_candidate':
+          '매수 조건을 충족한 AI 분석 완료 후보가 없어 HOLD했습니다.',
+      'unresolved_entry_limit_hit': '미해결 주문으로 신규 매수 한도가 차단됐습니다.',
+      'position_state_refresh_pending': '계좌 포지션 확인이 진행 중이어서 신규 매수를 보류했습니다.',
+      'position_retry_exit_unresolved': '청산 상태 확인이 완료되지 않아 신규 매수를 차단했습니다.',
+      'position_state_unavailable_after_entry_slot_grace':
+          '계좌 포지션 확인이 완료되지 않아 신규 매수를 보류했습니다.',
       'account_snapshot_unavailable': '계좌 조회를 완료하지 못해 매수를 차단했습니다.',
-      'scheduler_task_timeout': '스케줄러 제한 시간 안에 작업이 끝나지 않았습니다.',
+      'scheduler_task_timeout': '자동매매 분석 작업이 제한 시간 내 완료되지 않았습니다.',
+      'no_remaining_analysis_slot': '오늘 예정된 자동매매 분석이 모두 종료됐습니다.',
       'gpt_buy_score_below_threshold': 'AI 매수 점수가 기준에 미달해 매수를 보류했습니다.',
     };
     const en = {
+      'no_gpt_completed_execution_candidate':
+          'HOLD: no completed AI candidate met the BUY conditions.',
+      'no_remaining_analysis_slot':
+          'All scheduled analyses for today have finished.',
+      'position_state_unavailable_after_entry_slot_grace':
+          'New entries are on hold until account positions are confirmed.',
       'unresolved_entry_limit_hit':
           'An unresolved BUY occupies the new entry limit.',
       'position_state_refresh_pending':
@@ -266,7 +329,7 @@ class AutomationTodayDecisionSlot {
           'gpt_analysis_status': candidate.gptAnalysisStatus,
           'final_buy_score': candidate.finalBuyScore,
           'ai_reason': candidate.aiReason,
-          'reason': candidate.blockReason ?? json['reason'],
+          'reason': json['reason'] ?? candidate.blockReason,
         };
       }
     }
@@ -275,6 +338,12 @@ class AutomationTodayDecisionSlot {
       orderStatus: _nullableString(json['order_status']) ?? 'NOT SUBMITTED',
       fillStatus: _nullableString(json['fill_status']),
       orderBlockReason: _nullableString(json['order_block_reason']),
+      schedulerStatus: _nullableString(json['scheduler_status']),
+      schedulerReason: _nullableString(json['execution_reason']),
+      analysisReason: _nullableString(json['analysis_reason']),
+      scheduledAt: _nullableString(json['scheduled_at']),
+      schedulerFinishedAt: _nullableString(json['scheduler_finished_at']),
+      schedulerOutcomeApplied: json['scheduler_outcome_applied'] != false,
       analysisCandidates: analyses,
       gptBuyScore: _double(json['gpt_buy_score']),
       gptAnalysisStatus: _nullableString(json['gpt_analysis_status']),

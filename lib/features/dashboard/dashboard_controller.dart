@@ -1551,6 +1551,9 @@ class DashboardController extends ChangeNotifier {
 
   Future<void> load() async {
     final sessionGeneration = _authSessionGeneration;
+    // Refresh the analysis independently: another dashboard endpoint failing
+    // must not leave an old decision looking like the current result.
+    unawaited(refreshTodayAiDecisions());
     loading = true;
 
     notifyListeners();
@@ -1657,7 +1660,6 @@ class DashboardController extends ChangeNotifier {
   Future<void> _loadHomeRecentActivity() async {
     final sessionGeneration = _authSessionGeneration;
     var hadError = false;
-    _startTodayAiDecisionLoad(userScoped: false);
     try {
       final runs = await apiClient.fetchAdminAutomationRecentRuns(limit: 3);
       if (!_isCurrentAuthSession(sessionGeneration)) return;
@@ -1686,16 +1688,25 @@ class DashboardController extends ChangeNotifier {
   }
 
   void _startTodayAiDecisionLoad({required bool userScoped}) {
+    unawaited(refreshTodayAiDecisions(userScoped: userScoped));
+  }
+
+  Future<void> refreshTodayAiDecisions({bool userScoped = false}) {
     final version = ++_todayAiDecisionRequestVersion;
     todayAiDecisionsLoaded = false;
     todayAiDecisionsRequested = true;
     todayAiDecisionsError = null;
     todayAiDecisions = AutomationTodayDecisions.empty;
-    unawaited(
-      _loadTodayAiDecisions(
-        userScoped: userScoped,
-        version: version,
-      ),
+    // Home bootstrap can request this during a widget build. Publish the
+    // cleared/loading state after that build, and ignore retired requests.
+    scheduleMicrotask(() {
+      if (!_disposed && version == _todayAiDecisionRequestVersion) {
+        notifyListeners();
+      }
+    });
+    return _loadTodayAiDecisions(
+      userScoped: userScoped,
+      version: version,
     );
   }
 

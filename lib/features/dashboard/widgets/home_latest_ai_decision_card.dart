@@ -143,6 +143,13 @@ class _TodayDecisionSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final feed = controller.todayAiDecisions;
     final slots = feed.slots;
+    final executed = feed.executedSlots;
+    final latest = executed.isNotEmpty ? executed.first : slots.firstOrNull;
+    final previous = [
+      ...slots.where((slot) => slot != latest && !slot.isPending),
+      ...feed.executionHistory,
+    ];
+    final upcoming = slots.where((slot) => slot != latest && slot.isPending);
     final message = controller.todayAiDecisionsError ??
         (slots.isEmpty ? '오늘의 프로필 슬롯 결과가 없습니다.' : null);
     return SectionCard(
@@ -169,6 +176,9 @@ class _TodayDecisionSurface extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
+          if (feed.tradeDateKst.isNotEmpty)
+            Text('${feed.tradeDateKst} · KST',
+                style: const TextStyle(color: Colors.white60, fontSize: 12)),
           if (!controller.todayAiDecisionsLoaded &&
               controller.todayAiDecisionsError == null)
             const Text(
@@ -181,19 +191,22 @@ class _TodayDecisionSurface extends StatelessWidget {
               key: const ValueKey('home-ai-today-empty'),
               style: const TextStyle(color: Colors.white60),
             )
-          else
-            for (final slot in slots) ...[
-              _TodayDecisionSlot(
-                controller: controller,
-                slot: slot,
-              ),
-              if (slot != slots.last) const SizedBox(height: 8),
-            ],
+          else if (latest != null)
+            _TodayDecisionSlot(controller: controller, slot: latest),
           if (controller.todayAiDecisionsLoaded &&
-              feed.executionHistory.isNotEmpty) ...[
+              message == null &&
+              previous.isNotEmpty) ...[
             const SizedBox(height: 8),
             const Text('이전 슬롯 실행 이력'),
-            for (final slot in feed.executionHistory)
+            for (final slot in previous)
+              _TodayDecisionSlot(controller: controller, slot: slot),
+          ],
+          if (controller.todayAiDecisionsLoaded &&
+              message == null &&
+              upcoming.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text('예정된 분석'),
+            for (final slot in upcoming)
               _TodayDecisionSlot(controller: controller, slot: slot),
           ],
         ],
@@ -214,44 +227,60 @@ class _TodayDecisionSlot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final english = controller.appLanguage.languageCode == 'en';
-    final status = slot.isAiScoreHold
+    final status = slot.isAnalysisHold
         ? 'HOLD'
-        : slot.isFailed
-            ? 'FAILED'
-            : slot.isPositionRefreshPending
-                ? 'RETRY_PENDING'
-                : slot.isEntryRecoveryBlocked
-                    ? 'BLOCKED'
-                    : slot.hasResult
-                        ? (slot.signalStatus ?? slot.action ?? 'HOLD')
-                            .toUpperCase()
-                        : slot.isPending
-                            ? '\uBD84\uC11D \uC804'
-                            : slot.hasAnalysisResult
-                                ? 'HOLD'
-                                : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
+        : slot.isScheduleComplete
+            ? 'DONE'
+            : slot.isFailed
+                ? 'FAILED'
+                : slot.isPositionRefreshPending
+                    ? 'RETRY_PENDING'
+                    : slot.isEntryRecoveryBlocked
+                        ? (slot.hasPositionOrEntryBlock ? 'BLOCKED' : 'UNKNOWN')
+                        : slot.hasResult
+                            ? (slot.signalStatus ?? slot.action ?? 'HOLD')
+                                .toUpperCase()
+                            : slot.isPending
+                                ? '\uBD84\uC11D \uC804'
+                                : slot.hasAnalysisResult
+                                    ? 'HOLD'
+                                    : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
     final symbol = slot.symbol?.trim() ?? '';
-    final display = slot.isAiScoreHold
-        ? '${slot.hasResult ? '${_displaySymbol(controller, symbol, slot.symbolName)} · ' : ''}'
-            '${english ? 'AI score below threshold' : 'AI 점수 미달 · 매수 보류'}'
-        : slot.executionReasonCode == 'unresolved_entry_limit_hit'
-            ? (english ? 'Unresolved entry limit' : '미완료 매수 주문 한도 차단')
-            : slot.executionReasonCode == 'account_snapshot_unavailable'
-                ? (english ? 'Account snapshot unavailable' : '계좌 조회 확인 미완료')
-                : slot.isFailed
-                    ? (english ? 'Analysis failed' : '분석 실행 실패')
-                    : slot.isPositionRefreshPending
-                        ? (english ? 'Checking positions' : '포지션 확인 중')
-                        : slot.isEntryRecoveryBlocked
-                            ? (english ? 'Entry blocked' : '매수 진입 차단')
-                            : slot.hasResult
-                                ? _displaySymbol(
-                                    controller, symbol, slot.symbolName)
-                                : slot.isPending
-                                    ? '\uBD84\uC11D \uB300\uAE30'
-                                    : slot.hasAnalysisResult
-                                        ? '\uC815\uC0C1 \uBD84\uC11D \uC644\uB8CC'
-                                        : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
+    final display = slot.isScheduleComplete
+        ? (english ? 'Today\'s analyses finished' : '오늘 분석 종료')
+        : slot.executionReasonCode == 'no_gpt_completed_execution_candidate'
+            ? (english
+                ? 'No eligible completed AI candidate'
+                : 'AI 분석 완료 후보 없음')
+            : slot.isAiScoreHold
+                ? '${slot.hasResult ? '${_displaySymbol(controller, symbol, slot.symbolName)} · ' : ''}'
+                    '${english ? 'AI score below threshold' : 'AI 점수 미달 · 매수 보류'}'
+                : slot.executionReasonCode == 'unresolved_entry_limit_hit'
+                    ? (english ? 'Unresolved entry limit' : '미완료 매수 주문 한도 차단')
+                    : slot.executionReasonCode == 'account_snapshot_unavailable'
+                        ? (english
+                            ? 'Account snapshot unavailable'
+                            : '계좌 조회 확인 미완료')
+                        : slot.isFailed
+                            ? (english ? 'Analysis failed' : '분석 실행 실패')
+                            : slot.isPositionRefreshPending
+                                ? (english ? 'Checking positions' : '포지션 확인 중')
+                                : slot.isEntryRecoveryBlocked
+                                    ? (slot.hasPositionOrEntryBlock
+                                        ? (english
+                                            ? 'Entry blocked'
+                                            : '매수 진입 차단')
+                                        : (english
+                                            ? 'Review execution result'
+                                            : '실행 결과 확인'))
+                                    : slot.hasResult
+                                        ? _displaySymbol(
+                                            controller, symbol, slot.symbolName)
+                                        : slot.isPending
+                                            ? '\uBD84\uC11D \uB300\uAE30'
+                                            : slot.hasAnalysisResult
+                                                ? '\uC815\uC0C1 \uBD84\uC11D \uC644\uB8CC'
+                                                : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
     final analysisScore = [
       if (slot.gptAnalysisStatus != null) 'GPT ${slot.gptAnalysisStatus}',
       if (slot.gptBuyScore != null) 'GPT ${_number(slot.gptBuyScore!)}',
@@ -275,8 +304,8 @@ class _TodayDecisionSlot extends StatelessWidget {
                     : '포지션 확인 후 이 슬롯의 분석을 재개합니다.')
                 : slot.isEntryRecoveryBlocked
                     ? (english
-                        ? 'Position or exit checks did not complete. BUY is blocked.'
-                        : '포지션 또는 청산 확인이 완료되지 않아 매수를 차단했습니다.')
+                        ? 'Review the recorded execution reason.'
+                        : '기록된 실행 사유를 확인해 주세요.')
                     : slot.hasResult
                         ? analysisScore
                         : slot.isPending
@@ -284,15 +313,24 @@ class _TodayDecisionSlot extends StatelessWidget {
                             : slot.isQuantHold
                                 ? 'C \uAE30\uC900 \uC815\uB7C9 \uD1B5\uACFC \uD6C4\uBCF4 \uC5C6\uC74C \u00B7 GPT \uBD84\uC11D \uBBF8\uC2E4\uD589'
                                 : '\uBD84\uC11D \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.');
-    final reason = [slot.reason, slot.aiReason, slot.finalFailureReason]
+    final reason = [
+      slot.reason,
+      if (!slot.isAnalysisHold || slot.isAiScoreHold) slot.aiReason,
+      if (!slot.isAnalysisHold && !slot.isScheduleComplete)
+        slot.finalFailureReason,
+    ]
         .whereType<String>()
         .where((value) => value.trim().isNotEmpty)
         .toSet()
         .join(' · ');
-    final timestamp = parseTimestampToKst(slot.createdAtKst ?? slot.createdAt);
+    final timestamp = parseTimestampToKst(slot.createdAtKst ??
+        slot.createdAt ??
+        slot.schedulerFinishedAt ??
+        slot.scheduledAt);
     final timeText = timestamp == null
         ? ''
-        : ' · ${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} KST';
+        : ' · ${timestamp.year}-${timestamp.month.toString().padLeft(2, '0')}-${timestamp.day.toString().padLeft(2, '0')} '
+            '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} KST';
 
     return Container(
       key: ValueKey('home-ai-slot-card-${slot.schedulerSlot}'),

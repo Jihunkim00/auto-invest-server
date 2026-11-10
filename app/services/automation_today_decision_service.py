@@ -28,6 +28,10 @@ SYSTEM_AUTOMATION_RUN_MODES = (
     'automation_scheduler_profile_analysis', 'automation_entry_slot_recovery',
 )
 _INVALID_SYMBOLS = {'', 'NONE', 'NULL', 'UNKNOWN'}
+_ANALYSIS_HOLD_REASONS = {
+    'no_gpt_completed_execution_candidate', 'no_completed_gpt_final_candidate',
+    'gpt_buy_score_below_threshold',
+}
 
 
 class AutomationTodayDecisionService:
@@ -131,12 +135,22 @@ class AutomationTodayDecisionService:
         if row is None:
             return decision
         result = {**decision, 'scheduler_status': row.status,
-            'execution_reason': row.reason, 'analysis_reason': decision.get('reason')}
+            'execution_reason': row.reason, 'analysis_reason': decision.get('reason'),
+            'scheduled_at': _aware_utc(row.scheduled_at).isoformat(),
+            'scheduler_finished_at': _aware_utc(row.finished_at).isoformat() if row.finished_at else None}
+        # The ledger describes this execution, not a permanent account gate.
+        # A later analysis in the same slot supersedes an older failed attempt.
+        outcome_at = row.finished_at or row.started_at or row.scheduled_at
+        analysis_at = decision.get('created_at')
+        if analysis_at and _aware_utc(datetime.fromisoformat(analysis_at.replace('Z', '+00:00'))) > _aware_utc(outcome_at):
+            result['scheduler_outcome_applied'] = False
+            return result
+        result['scheduler_outcome_applied'] = True
         if row.status in {'failed', 'blocked', 'retry_pending'}:
             result.update(status=row.status, reason=row.reason)
         # A score gate is an analysis HOLD even if the executor's generic
         # blocked status was used. Keep scores and candidate analysis intact.
-        if row.reason == 'gpt_buy_score_below_threshold':
+        if row.reason in _ANALYSIS_HOLD_REASONS:
             result.update(status='analysis_complete', signal_status='hold', action='hold', reason=row.reason)
         elif row.status == 'HOLD' and decision.get('status') in {'retry_pending', 'no_result'}:
             result.update(status='analysis_complete', signal_status='hold', action='hold', reason=row.reason)
@@ -338,6 +352,13 @@ class AutomationTodayDecisionService:
                 'broker_submit_called': response.get('broker_submit_called') is True,
                 'real_order_submitted': response.get('real_order_submitted') is True,
             }
+        # Canonical no-candidate runs use WATCHLIST and may have no snapshot
+        # item or GPT rows. Their persisted HOLD is still a completed analysis.
+        run_reason = response.get('reason') or run.reason
+        if run_reason == 'no_gpt_completed_execution_candidate' and str(run.result or '').lower() == 'hold':
+            return {**base, **execution, 'status': 'analysis_complete',
+                'signal_status': 'hold', 'action': 'hold', 'ai_decision': 'HOLD',
+                'reason': run_reason}
         symbol = _normalize_symbol(
             response.get('returned_symbol')
             or response.get('analyzed_symbol')
