@@ -1,0 +1,51 @@
+{
+  "trade_date_kst": "2026-11-10",
+  "timezone": "Asia/Seoul",
+  "profile_id": 5,
+  "profile_key": "aut_kis_eec5f898",
+  "owner_user_id": 1,
+  "slots": [
+    {
+      "scheduler_slot": "11:10",
+      "status": "blocked",
+      "reason": "no_gpt_completed_execution_candidate",
+      "action": null,
+      "created_at": null,
+      "created_at_kst": null,
+      "owner_user_id": 1,
+      "profile_key": "aut_kis_eec5f898",
+      "scheduler_status": "blocked",
+      "execution_reason": "no_gpt_completed_execution_candidate",
+      "analysis_reason": null,
+      "order_block_reason": null
+    },
+    {
+      "scheduler_slot": "12:20",
+      "status": "blocked",
+      "reason": "no_gpt_completed_execution_candidate",
+      "action": null,
+      "created_at": null,
+      "created_at_kst": null,
+      "owner_user_id": 1,
+      "profile_key": "aut_kis_eec5f898",
+      "scheduler_status": "blocked",
+      "execution_reason": "no_gpt_completed_execution_candidate",
+      "analysis_reason": null,
+      "order_block_reason": null
+    },
+    {
+      "scheduler_slot": "13:30",
+      "status": "blocked",
+      "reason": "no_gpt_completed_execution_candidate",
+      "action": null,
+      "created_at": null,
+      "created_at_kst": null,
+      "owner_user_id": 1,
+      "profile_key": "aut_kis_eec5f898",
+      "scheduler_status": "blocked",
+      "execution_reason": "no_gpt_completed_execution_candidate",
+      "analysis_reason": null,
+      "order_block_reason": null
+    }
+  ]
+}

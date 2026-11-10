@@ -18,11 +18,11 @@ void main() {
     expect(slot.isAiScoreHold, isFalse);
   });
   const cases = {
-    'unresolved_entry_limit_hit': '미완료 매수 주문이 신규 진입 한도를 점유하고 있습니다.',
-    'position_state_refresh_pending': '보유 상태를 다시 확인한 후 이 슬롯의 분석을 재개합니다.',
-    'position_retry_exit_unresolved': '청산 주문 또는 청산 재시도 확인이 끝나지 않아 매수를 차단했습니다.',
+    'unresolved_entry_limit_hit': '미해결 주문으로 신규 매수 한도가 차단됐습니다.',
+    'position_state_refresh_pending': '계좌 포지션 확인이 진행 중이어서 신규 매수를 보류했습니다.',
+    'position_retry_exit_unresolved': '청산 상태 확인이 완료되지 않아 신규 매수를 차단했습니다.',
     'account_snapshot_unavailable': '계좌 조회를 완료하지 못해 매수를 차단했습니다.',
-    'scheduler_task_timeout': '스케줄러 제한 시간 안에 작업이 끝나지 않았습니다.',
+    'scheduler_task_timeout': '자동매매 분석 작업이 제한 시간 내 완료되지 않았습니다.',
     'gpt_buy_score_below_threshold': 'AI 매수 점수가 기준에 미달해 매수를 보류했습니다.',
   };
   for (final entry in cases.entries) {
