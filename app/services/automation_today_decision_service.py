@@ -107,6 +107,8 @@ class AutomationTodayDecisionService:
             profile=profile, schedule=schedule, slot=slot, local_date=local_date,
             now=current, admin_user_id=admin_user_id,
         ) for slot in historical_slots]
+        history = [self._with_scheduler_outcome(db, decision, profile=profile,
+            owner_user_id=owner_user_id, local_date=local_date) for decision in history]
         return {
             'trade_date_kst': local_date.isoformat(),
             'timezone': str(schedule.get('timezone') or 'Asia/Seoul'),
@@ -127,6 +129,10 @@ class AutomationTodayDecisionService:
 
     @staticmethod
     def _with_scheduler_outcome(db, decision, *, profile, owner_user_id, local_date):
+        decision = {**decision, 'trade_date_kst': local_date.isoformat(),
+            'analysis_status': decision.get('status'),
+            'analysis_execution_status': decision.get('analysis_execution_status') or decision.get('signal_status'),
+            'analysis_reason': decision.get('reason')}
         account = 'admin' if owner_user_id is None else f'user-{owner_user_id}'
         key = f"{account}:{profile.get('provider')}:{local_date.isoformat()}:{decision['scheduler_slot']}"
         row = db.query(AutomationSchedulerSlot).filter_by(
@@ -146,6 +152,22 @@ class AutomationTodayDecisionService:
             result['scheduler_outcome_applied'] = False
             return result
         result['scheduler_outcome_applied'] = True
+        # Read persisted canonical results only. A nested profile_buy is the
+        # BUY outcome; outer submission flags can also describe an exit order.
+        payload = _json(row.result_json)
+        if isinstance(payload.get('items'), list):
+            items = [item for item in payload['items'] if isinstance(item, dict)
+                     and item.get('user_id') == owner_user_id]
+            payload = items[0] if len(items) == 1 else {}
+        buy = payload.get('profile_buy')
+        buy = buy if isinstance(buy, dict) else payload
+        if buy is payload and str(payload.get('action') or payload.get('side') or '').lower() in {'sell', 'would_sell'}:
+            buy = {}  # User scheduler exits are not BUY submission evidence.
+        for field in ('calendar_gap_risk', 'calendar_gap_candidate_diagnostics',
+                      'broker_submit_called', 'real_order_submitted', 'buy_execution_allowed'):
+            if field in buy:
+                result[field] = buy[field]
+        result['execution_status'] = buy.get('status') or buy.get('result')
         if row.status in {'failed', 'blocked', 'retry_pending'}:
             result.update(status=row.status, reason=row.reason)
         # A score gate is an analysis HOLD even if the executor's generic
@@ -318,6 +340,7 @@ class AutomationTodayDecisionService:
         created_at = _aware_utc(run.created_at)
         execution = {
             'signal_status': run.result, 'run_id': run.id, 'run_key': run.run_key,
+            'analysis_execution_status': run.result,
             'signal_id': run.signal_id,
             'created_at': created_at.isoformat().replace('+00:00', 'Z'),
             'created_at_kst': created_at.astimezone(KST).isoformat(),
@@ -377,6 +400,7 @@ class AutomationTodayDecisionService:
             return {
                 **base,
                 'status': 'analysis_complete',
+                'analysis_execution_status': run.result,
                 'signal_status': run.result,
                 'run_id': run.id,
                 'run_key': run.run_key,
@@ -435,6 +459,7 @@ class AutomationTodayDecisionService:
         return {
             **base,
             'status': 'result',
+            'analysis_execution_status': run.result,
             'ai_decision': 'BUY APPROVED' if str(action or '').lower() in {'buy', 'would_buy'} else str(action or 'hold').upper(),
             'signal_status': signal.signal_status if signal is not None else run.result,
             'run_id': run.id,

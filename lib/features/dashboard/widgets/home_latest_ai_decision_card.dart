@@ -227,6 +227,13 @@ class _TodayDecisionSlot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final english = controller.appLanguage.languageCode == 'en';
+    final executionStatus = slot.executionBlocked
+        ? 'BLOCKED'
+        : slot.orderSubmitted
+            ? (slot.fillConfirmed ? 'FILLED' : 'SUBMITTED')
+            : slot.analysisPassed
+                ? 'ANALYZED'
+                : null;
     final status = slot.isAnalysisHold
         ? 'HOLD'
         : slot.isScheduleComplete
@@ -236,9 +243,15 @@ class _TodayDecisionSlot extends StatelessWidget {
                 : slot.isPositionRefreshPending
                     ? 'RETRY_PENDING'
                     : slot.isEntryRecoveryBlocked
-                        ? (slot.hasPositionOrEntryBlock ? 'BLOCKED' : 'UNKNOWN')
+                        ? (slot.hasPositionOrEntryBlock ||
+                                slot.hasExecutionSummary
+                            ? 'BLOCKED'
+                            : 'UNKNOWN')
                         : slot.hasResult
-                            ? (slot.signalStatus ?? slot.action ?? 'HOLD')
+                            ? (executionStatus ??
+                                    slot.signalStatus ??
+                                    slot.action ??
+                                    'HOLD')
                                 .toUpperCase()
                             : slot.isPending
                                 ? '\uBD84\uC11D \uC804'
@@ -265,7 +278,9 @@ class _TodayDecisionSlot extends StatelessWidget {
                             ? (english ? 'Analysis failed' : '분석 실행 실패')
                             : slot.isPositionRefreshPending
                                 ? (english ? 'Checking positions' : '포지션 확인 중')
-                                : slot.isEntryRecoveryBlocked
+                                : slot.isEntryRecoveryBlocked &&
+                                        !slot.hasResult &&
+                                        slot.symbol == null
                                     ? (slot.hasPositionOrEntryBlock
                                         ? (english
                                             ? 'Entry blocked'
@@ -273,7 +288,7 @@ class _TodayDecisionSlot extends StatelessWidget {
                                         : (english
                                             ? 'Review execution result'
                                             : '실행 결과 확인'))
-                                    : slot.hasResult
+                                    : slot.hasResult || slot.symbol != null
                                         ? _displaySymbol(
                                             controller, symbol, slot.symbolName)
                                         : slot.isPending
@@ -288,7 +303,8 @@ class _TodayDecisionSlot extends StatelessWidget {
       if (slot.finalSellScore != null) 'Sell ${slot.finalSellScore!}',
       if (slot.confidence != null) 'Confidence ${_number(slot.confidence!)}',
     ].join(' · ');
-    final executionExplanation = slot.executionReasonLabel(english: english);
+    final executionExplanation = slot.executionReasonLabel(english: english) ??
+        (slot.hasExecutionSummary ? slot.executionReasonCode : null);
     final score = executionExplanation ??
         (slot.isFailed
             ? [
@@ -362,6 +378,8 @@ class _TodayDecisionSlot extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             score,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           if (executionExplanation != null && analysisScore.isNotEmpty)
@@ -369,7 +387,9 @@ class _TodayDecisionSlot extends StatelessWidget {
               analysisScore,
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
-          if (slot.hasAnalysisResult ||
+          if (slot.hasExecutionSummary)
+            _ExecutionSummary(slot: slot, english: english)
+          else if (slot.hasAnalysisResult ||
               slot.orderBlockReason != null ||
               slot.orderStatus != 'NOT SUBMITTED') ...[
             const SizedBox(height: 3),
@@ -389,7 +409,7 @@ class _TodayDecisionSlot extends StatelessWidget {
                 style: const TextStyle(color: Colors.white60, fontSize: 12),
               ),
           ],
-          if (reason.isNotEmpty) ...[
+          if (reason.isNotEmpty && !slot.hasExecutionSummary) ...[
             const SizedBox(height: 3),
             Text(
               reason,
@@ -452,6 +472,116 @@ class _TodayDecisionSlot extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ExecutionSummary extends StatelessWidget {
+  const _ExecutionSummary({required this.slot, required this.english});
+
+  final AutomationTodayDecisionSlot slot;
+  final bool english;
+
+  @override
+  Widget build(BuildContext context) {
+    final unknown = english ? 'Unavailable' : '확인 불가';
+    final analysis = slot.analysisPassed
+        ? (english ? 'Passed' : '통과')
+        : slot.isAnalysisHold
+            ? 'HOLD'
+            : slot.gptAnalysisStatus == 'completed' || slot.hasAnalysisResult
+                ? (english ? 'Completed' : '완료')
+                : unknown;
+    final execution = slot.executionHold
+        ? 'HOLD'
+        : slot.executionBlocked
+            ? (english ? 'Blocked' : '차단')
+            : slot.orderSubmitted
+                ? (slot.fillConfirmed
+                    ? (english ? 'Fill confirmed' : '체결 확인')
+                    : (english ? 'Order submitted' : '매수 제출'))
+                : slot.buyExecutionAllowed == false
+                    ? (english ? 'Not allowed' : '실행 불가')
+                    : (english ? 'Unconfirmed' : '미확인');
+    final submitted = slot.orderSubmitted
+        ? (english ? 'Submitted' : '제출')
+        : slot.realOrderSubmitted == false || slot.brokerSubmitCalled == false
+            ? (english ? 'Not submitted' : '미제출')
+            : unknown;
+    final fill = slot.fillConfirmed
+        ? (english ? 'Confirmed' : '확인')
+        : slot.orderStatus == 'PARTIALLY FILLED'
+            ? (english ? 'Partial fill' : '부분 체결')
+            : (english ? 'Unconfirmed' : '미확인');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        Wrap(spacing: 12, runSpacing: 3, children: [
+          Text('${english ? 'AI analysis' : 'AI 분석'}: $analysis',
+              key: ValueKey('home-ai-analysis-status-${slot.schedulerSlot}'),
+              style: TextStyle(
+                  color:
+                      slot.analysisPassed ? Colors.tealAccent : Colors.white70,
+                  fontSize: 12)),
+          Text('${english ? 'Actual BUY' : '실제 매수'}: $execution',
+              key: ValueKey('home-ai-execution-status-${slot.schedulerSlot}'),
+              style: TextStyle(
+                  color: slot.executionBlocked && !slot.isAnalysisHold
+                      ? Colors.amberAccent
+                      : Colors.white70,
+                  fontSize: 12)),
+        ]),
+        Text(
+            '${english ? 'Order' : '주문'}: $submitted · ${english ? 'Fill' : '체결'}: $fill',
+            key: ValueKey('home-ai-order-status-${slot.schedulerSlot}'),
+            style: const TextStyle(color: Colors.white60, fontSize: 12)),
+        if (slot.hasCalendarGapScores)
+          Material(
+            type: MaterialType.transparency,
+            child: ExpansionTile(
+              key: ValueKey('home-ai-execution-details-${slot.schedulerSlot}'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(english ? 'Applied score thresholds' : '적용 점수 상세',
+                  style: const TextStyle(fontSize: 12)),
+              children: [
+                _scoreRow(english ? 'C quant score' : 'C 퀀트 점수',
+                    slot.quantCScore, unknown),
+                _scoreRow(english ? 'Required C score' : '필요한 C 점수',
+                    slot.requiredCScore, unknown),
+                if (slot.quantCScore != null && slot.requiredCScore != null)
+                  _scoreRow(
+                      english ? 'Shortfall' : '부족 점수',
+                      (slot.requiredCScore! - slot.quantCScore!)
+                          .clamp(0, double.infinity)
+                          .toDouble(),
+                      unknown),
+                _scoreRow(
+                    english ? 'Final buy score' : '최종 매수 점수',
+                    slot.calendarGapFinalBuyScore ?? slot.finalBuyScore,
+                    unknown),
+                _scoreRow(english ? 'Required final score' : '필요한 최종 점수',
+                    slot.requiredFinalScore, unknown),
+                if ((slot.calendarGapFinalBuyScore ?? slot.finalBuyScore) !=
+                        null &&
+                    slot.requiredFinalScore != null)
+                  Text(
+                      '${english ? 'Final score result' : '최종 점수 결과'}: '
+                      '${(slot.calendarGapFinalBuyScore ?? slot.finalBuyScore)! >= slot.requiredFinalScore! ? (english ? 'Passed' : '통과') : (english ? 'Below threshold' : '미달')}',
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _scoreRow(String label, double? score, String unknown) => Align(
+        alignment: Alignment.centerLeft,
+        child: Text('$label: ${score?.toStringAsFixed(2) ?? unknown}',
+            style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      );
 }
 
 class _HomeAiDecisionDialog extends StatefulWidget {

@@ -59,6 +59,18 @@ class AutomationTodayDecisions {
 
   factory AutomationTodayDecisions.fromJson(Map<String, dynamic> json) {
     final rawSlots = json['slots'];
+    bool sameScope(Map item) =>
+        (item['owner_user_id'] == null ||
+            json['owner_user_id'] == null ||
+            _int(item['owner_user_id']) == _int(json['owner_user_id'])) &&
+        (item['profile_id'] == null ||
+            json['profile_id'] == null ||
+            _int(item['profile_id']) == _int(json['profile_id'])) &&
+        (item['profile_key'] == null ||
+            json['profile_key'] == null ||
+            item['profile_key'] == json['profile_key']) &&
+        (item['trade_date_kst'] == null ||
+            item['trade_date_kst'] == json['trade_date_kst']);
     return AutomationTodayDecisions(
       tradeDateKst: _string(json['trade_date_kst'] ?? json['tradeDateKst']),
       timezone: _string(json['timezone']).isEmpty
@@ -75,6 +87,7 @@ class AutomationTodayDecisions {
       slots: rawSlots is List
           ? rawSlots
               .whereType<Map>()
+              .where(sameScope)
               .map((item) => AutomationTodayDecisionSlot.fromJson(
                     Map<String, dynamic>.from(item),
                   ))
@@ -82,6 +95,7 @@ class AutomationTodayDecisions {
           : const <AutomationTodayDecisionSlot>[],
       executionHistory: (json['execution_history'] as List? ?? const [])
           .whereType<Map>()
+          .where(sameScope)
           .map((item) => AutomationTodayDecisionSlot.fromJson(
                 Map<String, dynamic>.from(item),
               ))
@@ -143,6 +157,16 @@ class AutomationTodayDecisionSlot {
     this.scheduledAt,
     this.schedulerFinishedAt,
     this.schedulerOutcomeApplied = true,
+    this.analysisStatus,
+    this.analysisExecutionStatus,
+    this.executionStatus,
+    this.brokerSubmitCalled,
+    this.realOrderSubmitted,
+    this.buyExecutionAllowed,
+    this.quantCScore,
+    this.requiredCScore,
+    this.requiredFinalScore,
+    this.calendarGapFinalBuyScore,
   });
 
   final String schedulerSlot;
@@ -196,6 +220,51 @@ class AutomationTodayDecisionSlot {
   final String? scheduledAt;
   final String? schedulerFinishedAt;
   final bool schedulerOutcomeApplied;
+  final String? analysisStatus;
+  final String? analysisExecutionStatus;
+  final String? executionStatus;
+  final bool? brokerSubmitCalled;
+  final bool? realOrderSubmitted;
+  final bool? buyExecutionAllowed;
+  final double? quantCScore;
+  final double? requiredCScore;
+  final double? requiredFinalScore;
+  final double? calendarGapFinalBuyScore;
+
+  bool get analysisPassed =>
+      analysisExecutionStatus?.toUpperCase() == 'LIVE_READY' ||
+      signalStatus?.toUpperCase() == 'LIVE_READY' ||
+      aiDecision == 'BUY APPROVED';
+
+  bool get executionBlocked =>
+      (schedulerOutcomeApplied &&
+          schedulerStatus?.toLowerCase() == 'blocked') ||
+      executionStatus?.toLowerCase() == 'blocked' ||
+      status == 'blocked';
+
+  bool get executionHold =>
+      isAnalysisHold ||
+      (schedulerOutcomeApplied && schedulerStatus?.toUpperCase() == 'HOLD') ||
+      executionStatus?.toLowerCase() == 'hold';
+
+  bool get orderSubmitted =>
+      realOrderSubmitted == true ||
+      (executionStatus == 'submitted' &&
+          brokerSubmitCalled == true &&
+          realOrderSubmitted != false) ||
+      const {'BROKER SUBMITTED', 'PARTIALLY FILLED', 'FILLED'}
+          .contains(orderStatus);
+
+  bool get fillConfirmed => orderStatus == 'FILLED' || fillStatus == 'FILLED';
+
+  bool get hasExecutionSummary =>
+      analysisPassed ||
+      executionStatus != null ||
+      (schedulerOutcomeApplied && schedulerStatus != null) ||
+      orderSubmitted;
+
+  bool get hasCalendarGapScores =>
+      executionReasonCode?.startsWith('calendar_gap_') == true;
 
   int get resultEpoch =>
       DateTime.tryParse(createdAt ??
@@ -213,7 +282,11 @@ class AutomationTodayDecisionSlot {
       hasAnalysisResult && (symbol?.trim().isNotEmpty ?? false);
   bool get isFailed => status == 'failed';
   bool get hasAnalysisResult =>
-      status == 'result' || status == 'analysis_complete' || isAnalysisHold;
+      status == 'result' ||
+      status == 'analysis_complete' ||
+      analysisStatus == 'result' ||
+      analysisStatus == 'analysis_complete' ||
+      isAnalysisHold;
   bool get isQuantHold =>
       status == 'analysis_complete' &&
       gptTargetSymbols.isEmpty &&
@@ -246,6 +319,9 @@ class AutomationTodayDecisionSlot {
       }.contains(executionReasonCode);
 
   String? get executionReasonCode {
+    if (schedulerOutcomeApplied && _nullableString(schedulerReason) != null) {
+      return schedulerReason;
+    }
     const executionBlocks = {
       'unresolved_entry_limit_hit',
       'position_state_refresh_pending',
@@ -284,6 +360,12 @@ class AutomationTodayDecisionSlot {
       'scheduler_task_timeout': '자동매매 분석 작업이 제한 시간 내 완료되지 않았습니다.',
       'no_remaining_analysis_slot': '오늘 예정된 자동매매 분석이 모두 종료됐습니다.',
       'gpt_buy_score_below_threshold': 'AI 매수 점수가 기준에 미달해 매수를 보류했습니다.',
+      'calendar_gap_c_below_threshold': '주말 전 강화된 C 점수 기준을 충족하지 못해 매수하지 않았습니다.',
+      'calendar_gap_final_below_threshold':
+          '주말 전 강화된 최종 점수 기준을 충족하지 못해 매수하지 않았습니다.',
+      'calendar_gap_risk_unavailable': '거래일·휴장 위험 정보를 확인할 수 없어 매수하지 않았습니다.',
+      'weekend_gap_late_entry_block': '주말 전 신규 진입 마감으로 매수하지 않았습니다.',
+      'position_management_priority': '포지션 관리 우선으로 신규 매수를 차단했습니다.',
     };
     const en = {
       'no_gpt_completed_execution_candidate':
@@ -304,6 +386,16 @@ class AutomationTodayDecisionSlot {
           'The scheduler task did not finish within its time limit.',
       'gpt_buy_score_below_threshold':
           'BUY is on hold because the AI score is below the threshold.',
+      'calendar_gap_c_below_threshold':
+          'BUY blocked: C score is below the stricter pre-weekend threshold.',
+      'calendar_gap_final_below_threshold':
+          'BUY blocked: final score is below the stricter pre-weekend threshold.',
+      'calendar_gap_risk_unavailable':
+          'BUY blocked: trading-day and market-closure risk is unavailable.',
+      'weekend_gap_late_entry_block':
+          'New entries are closed before the weekend.',
+      'position_management_priority':
+          'BUY blocked: position management takes priority.',
     };
     return (english ? en : ko)[executionReasonCode];
   }
@@ -313,27 +405,52 @@ class AutomationTodayDecisionSlot {
     final summaryCandidates = analyses.isNotEmpty
         ? analyses
         : _candidates(json['score_gate_candidates']);
+    final selectedSymbol = _nullableString(json['symbol']) ??
+        _nullableString(json['final_selected_symbol']);
+    final completed = summaryCandidates.where((item) =>
+        item.gptAnalysisStatus == 'completed' &&
+        (item.symbol == selectedSymbol ||
+            (selectedSymbol == null &&
+                (summaryCandidates.length == 1 ||
+                    json['status'] == 'analysis_complete'))));
+    final candidate = completed.firstOrNull;
     // Older servers can supply audit rows without top-level summary fields.
-    if (json['status'] == 'analysis_complete' &&
-        _nullableString(json['symbol']) == null) {
-      final completed = summaryCandidates.where(
-        (item) => item.gptAnalysisStatus == 'completed',
-      );
-      if (completed.isNotEmpty) {
-        final candidate = completed.first;
-        json = {
-          ...json,
-          'symbol': candidate.symbol,
-          'symbol_name': candidate.name,
-          'gpt_buy_score': candidate.gptBuyScore ?? candidate.aiBuyScore,
-          'gpt_analysis_status': candidate.gptAnalysisStatus,
-          'final_buy_score': candidate.finalBuyScore,
-          'ai_reason': candidate.aiReason,
-          'reason': json['reason'] ?? candidate.blockReason,
-        };
-      }
+    if (candidate != null) {
+      json = {
+        ...json,
+        'symbol': json['symbol'] ?? candidate.symbol,
+        'symbol_name': json['symbol_name'] ?? candidate.name,
+        'gpt_buy_score': json['gpt_buy_score'] ??
+            candidate.gptBuyScore ??
+            candidate.aiBuyScore,
+        'gpt_analysis_status':
+            json['gpt_analysis_status'] ?? candidate.gptAnalysisStatus,
+        'final_buy_score': json['final_buy_score'] ?? candidate.finalBuyScore,
+        'ai_reason': json['ai_reason'] ?? candidate.aiReason,
+        'reason': json['reason'] ?? candidate.blockReason,
+      };
     }
+    final risk = _map(json['calendar_gap_risk']);
+    final diagnostics = json['calendar_gap_candidate_diagnostics'];
+    final diagnostic = diagnostics is List
+        ? diagnostics
+            .whereType<Map>()
+            .where((item) => item['symbol'] == json['symbol'])
+            .firstOrNull
+        : null;
     return AutomationTodayDecisionSlot(
+      analysisStatus: _nullableString(json['analysis_status']),
+      analysisExecutionStatus:
+          _nullableString(json['analysis_execution_status']),
+      executionStatus: _nullableString(json['execution_status']),
+      brokerSubmitCalled: _bool(json['broker_submit_called']),
+      realOrderSubmitted: _bool(json['real_order_submitted']),
+      buyExecutionAllowed: _bool(json['buy_execution_allowed']),
+      quantCScore:
+          _double(diagnostic?['quant_c_score']) ?? candidate?.quantCScore,
+      requiredCScore: _double(risk['required_c_score']),
+      requiredFinalScore: _double(risk['required_final_score']),
+      calendarGapFinalBuyScore: _double(diagnostic?['final_buy_score']),
       aiDecision: _nullableString(json['ai_decision']),
       orderStatus: _nullableString(json['order_status']) ?? 'NOT SUBMITTED',
       fillStatus: _nullableString(json['fill_status']),
@@ -455,6 +572,11 @@ int? _int(Object? value) {
 }
 
 double? _double(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse(value?.toString() ?? '');
+  final result = value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString() ?? '');
+  return result?.isFinite == true ? result : null;
 }
+
+Map _map(Object? value) => value is Map ? value : const {};
+bool? _bool(Object? value) => value is bool ? value : null;

@@ -49,16 +49,20 @@ void main() {
           ),
         ),
       ));
-      expect(find.textContaining('BUY APPROVED'), findsOneWidget);
-      expect(find.textContaining(notSubmitted ? 'NOT SUBMITTED' : orderStatus),
+      expect(find.text('AI 분석: 통과'), findsOneWidget);
+      expect(find.textContaining('주문: ${notSubmitted ? '확인 불가' : '제출'}'),
+          findsOneWidget);
+      expect(
+          find.text(
+              '실제 매수: ${orderStatus == 'BLOCKED' ? '차단' : orderStatus == 'FILLED' ? '체결 확인' : orderStatus == 'BROKER SUBMITTED' ? '매수 제출' : '미확인'}'),
           findsOneWidget);
       if (orderStatus == 'BROKER SUBMITTED') {
-        expect(find.textContaining('PENDING'), findsOneWidget);
+        expect(find.textContaining('체결: 미확인'), findsOneWidget);
       }
       if (notSubmitted) {
         expect(find.textContaining('scheduler_task_expired_before_buy'),
             findsOneWidget);
-        expect(find.textContaining('FILLED'), findsNothing);
+        expect(find.textContaining('체결 확인'), findsNothing);
       }
       controller.dispose();
     });
