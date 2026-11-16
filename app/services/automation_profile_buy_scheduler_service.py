@@ -55,14 +55,14 @@ POSSIBLE_ORDER_MAX_AGE_SECONDS = 10.0
 def build_automation_profile_buy_scheduler_service(db: Session) -> 'AutomationProfileBuySchedulerService':
     settings = get_settings()
     client = KisClient(settings, KisAuthManager(settings, db))
-    from app.services.kis_order_sync_service import KisOrderSyncService
+    from app.services.kis_automatic_order_reconciliation_service import AutomaticKisOrderSyncService
     from app.services.kis_order_validation_service import KisOrderValidationService
 
     return AutomationProfileBuySchedulerService(
         client=client,
         broker=KisBroker(client),
         validation_service=KisOrderValidationService(client),
-        order_sync_service=KisOrderSyncService(client),
+        order_sync_service=AutomaticKisOrderSyncService(client),
         runtime_settings=RuntimeSettingService(),
         strategy_profiles=AutomationProfileService(),
     )
@@ -380,6 +380,9 @@ class AutomationProfileBuySchedulerService:
                 profile=profile,
                 now=now_utc,
             )
+        from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+        KisAutomaticOrderReconciliationService(now_provider=lambda: now_utc).reconcile_account(
+            db, client=self.client, trigger='pre_entry')
         selection_mode = str(runtime.get('quant_selection_mode') or 'A_ONLY').strip().upper()
         calendar_gap_risk = self.calendar_gap_risk_service.evaluate(
             MARKET,

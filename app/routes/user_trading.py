@@ -29,6 +29,12 @@ from app.services.user_kis_order_sync_service import UserKisOrderSyncService
 router = APIRouter(prefix='/users/me/trading', tags=['user-trading-foundation'])
 
 
+@router.get('/order-reconciliation')
+def get_my_order_reconciliation(db: Session = Depends(get_db), user: User = Depends(require_regular_user)):
+    from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+    return KisAutomaticOrderReconciliationService.status(db, owner_user_id=int(user.id))
+
+
 class UserTradingRunOnceRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 

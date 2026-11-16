@@ -727,6 +727,14 @@ class UserAutoTradingSchedulerService:
                 continue
             aggregate['processed'] += 1
             try:
+                if normalized_provider == 'kis':
+                    from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+                    KisAutomaticOrderReconciliationService(
+                        now_provider=lambda: current,
+                        client_factory=lambda session, owner: self.account_service.get_kis_read_only_client(
+                            session, session.get(User, owner)),
+                    ).reconcile_account(
+                        db, owner_user_id=int(user.id), trigger='pre_entry')
                 item = self._process_user(
                     db,
                     user=user,

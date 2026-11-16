@@ -13,6 +13,7 @@ class AutomationTodayDecisions {
     required this.profileStatus,
     required this.slots,
     this.executionHistory = const <AutomationTodayDecisionSlot>[],
+    this.orderReconciliation,
   });
 
   static const empty = AutomationTodayDecisions(
@@ -39,6 +40,7 @@ class AutomationTodayDecisions {
   final String? profileStatus;
   final List<AutomationTodayDecisionSlot> slots;
   final List<AutomationTodayDecisionSlot> executionHistory;
+  final Map<String, dynamic>? orderReconciliation;
 
   bool get hasProfile => profileId != null;
   bool get isLoadedForToday => tradeDateKst.isNotEmpty;
@@ -72,6 +74,9 @@ class AutomationTodayDecisions {
         (item['trade_date_kst'] == null ||
             item['trade_date_kst'] == json['trade_date_kst']);
     return AutomationTodayDecisions(
+      orderReconciliation: json['order_reconciliation'] is Map
+          ? Map<String, dynamic>.from(json['order_reconciliation'] as Map)
+          : null,
       tradeDateKst: _string(json['trade_date_kst'] ?? json['tradeDateKst']),
       timezone: _string(json['timezone']).isEmpty
           ? 'Asia/Seoul'

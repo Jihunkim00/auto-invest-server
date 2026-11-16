@@ -49,6 +49,8 @@ class AutomationTodayDecisionService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         current = _aware_utc(now or datetime.now(UTC))
+        from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+        order_reconciliation = KisAutomaticOrderReconciliationService.status(db, owner_user_id=owner_user_id)
         schedule = self._schedule(
             db,
             owner_user_id=owner_user_id,
@@ -67,6 +69,7 @@ class AutomationTodayDecisionService:
                 'owner_user_id': owner_user_id,
                 'profile_status': None,
                 'slots': [],
+                'order_reconciliation': order_reconciliation,
             }
 
         profile = schedule.get('profile') or {}
@@ -125,6 +128,7 @@ class AutomationTodayDecisionService:
             'profile_status': schedule.get('status'),
             'slots': decisions,
             'execution_history': history,
+            'order_reconciliation': order_reconciliation if profile.get('provider') == 'kis' else None,
         }
 
     @staticmethod

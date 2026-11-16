@@ -8,6 +8,7 @@ import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/candidate.dart';
 import '../../../models/automation_today_decisions.dart';
+import 'kis_order_reconciliation_status.dart';
 import '../../../models/log_items.dart';
 import '../../../models/watchlist_run_result.dart';
 import '../dashboard_controller.dart';
@@ -179,6 +180,8 @@ class _TodayDecisionSurface extends StatelessWidget {
           if (feed.tradeDateKst.isNotEmpty)
             Text('${feed.tradeDateKst} · KST',
                 style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          if (feed.orderReconciliation != null)
+            KisOrderReconciliationStatus(status: feed.orderReconciliation!),
           if (!controller.todayAiDecisionsLoaded &&
               controller.todayAiDecisionsError == null)
             const Text(
@@ -1141,6 +1144,10 @@ String? _latestTime(DashboardController controller) {
 
 String _translateBlockReason(String reason) {
   final normalized = reason.trim().toLowerCase();
+  if (normalized == 'local_unresolved_sell_order' ||
+      normalized == 'duplicate_open_sell_order') {
+    return '이전 매도 주문의 최종 상태를 확인 중이어서 신규 매수를 보류했습니다.';
+  }
   const labels = <String, String>{
     'c_quant_unavailable': 'C score unavailable',
     'c_score_invalid': 'C score invalid',

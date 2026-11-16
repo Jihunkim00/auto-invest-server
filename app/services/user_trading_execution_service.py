@@ -965,6 +965,9 @@ class UserTradingExecutionService:
                     reason='user_exit_submit_failed', analysis=analysis, risk=risk,
                 )
         status = str(order.internal_status or '').upper()
+        if normalized_provider == 'kis' and not simulated and broker_called:
+            self._reconcile_kis_after_submit(db, order, client)
+            status = str(order.internal_status or '').upper()
         real_submitted = not simulated and status not in {
             InternalOrderStatus.FAILED.value,
             InternalOrderStatus.REJECTED.value,
@@ -1318,6 +1321,7 @@ class UserTradingExecutionService:
                         status='PASS' if acknowledged else 'FAILED',
                         reason=None if acknowledged else 'broker_order_id_missing')
             self._apply_broker_order(db, order, broker_order)
+            self._reconcile_kis_after_submit(db, order, client)
             status_value = str(order.internal_status or "").upper()
             real_submitted = status_value not in {
                 InternalOrderStatus.FAILED.value,
@@ -1863,6 +1867,17 @@ class UserTradingExecutionService:
         row.canceled_at = _broker_datetime(broker_order, "canceled_at")
         row.response_payload = json.dumps(_safe_broker_payload(broker_order), ensure_ascii=False, default=str)
         db.commit()
+        db.refresh(row)
+
+    @staticmethod
+    def _reconcile_kis_after_submit(db, row, client):
+        from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+        try:
+            KisAutomaticOrderReconciliationService().reconcile_account(
+                db, owner_user_id=row.owner_user_id, client=client, trigger='post_submit', order_id=row.id)
+        except Exception:
+            # A failed read/lease cannot invalidate an acknowledged submission.
+            db.rollback()
         db.refresh(row)
 
     @staticmethod

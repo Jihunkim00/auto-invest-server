@@ -1243,6 +1243,21 @@ class OperationTestLiveModeClaim(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+class KisOrderReconciliationState(Base):
+    """Durable read-only reconciliation lease and public account diagnostics."""
+    __tablename__ = 'kis_order_reconciliation_states'
+
+    scope_key = Column(String(40), primary_key=True)
+    lease_token = Column(String(32), nullable=True)
+    lease_until = Column(DateTime, nullable=True)
+    next_attempt_at = Column(DateTime, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    checked_count = Column(Integer, nullable=False, default=0)
+    finalized_count = Column(Integer, nullable=False, default=0)
+    failure_count = Column(Integer, nullable=False, default=0)
+    last_failure_reason = Column(String(80), nullable=True)
+
+
 class TradeRunLog(Base):
     owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     __tablename__ = "trade_run_logs"

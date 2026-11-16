@@ -88,8 +88,15 @@ from app.services.kis_watchlist_update_service import (
 from app.services.market_profile_service import MarketProfileError
 from app.services.market_session_service import MarketSessionError, MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.auth_dependencies import require_admin
 
 router = APIRouter(prefix="/kis", tags=["kis"])
+
+
+@router.get('/orders/reconciliation-status')
+def get_admin_order_reconciliation(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+    return KisAutomaticOrderReconciliationService.status(db)
 
 
 class KisShadowExitReviewQueueActionRequest(BaseModel):

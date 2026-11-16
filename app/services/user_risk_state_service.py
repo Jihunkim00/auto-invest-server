@@ -150,6 +150,10 @@ def _order_event_time(row: OrderLog, tz: ZoneInfo) -> datetime | None:
 
 
 def _is_filled(row: OrderLog) -> bool:
+    # A terminal cancellation/rejection can still contain a real partial fill.
+    # Its entry must continue consuming the original day's trade allowance.
+    if (_number(row.filled_qty) or 0) > 0:
+        return True
     status = str(row.internal_status or '').upper()
     if status in _FILLED_STATUSES:
         return True

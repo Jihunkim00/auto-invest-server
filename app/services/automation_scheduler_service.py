@@ -58,7 +58,7 @@ from app.services.account_snapshot_retry import (
     retryable_kis_account_snapshot_error,
 )
 from app.services.kis_account_state_cache_service import KisAccountStateCacheService
-from app.services.kis_order_sync_service import KisOrderSyncService
+from app.services.kis_automatic_order_reconciliation_service import AutomaticKisOrderSyncService as KisOrderSyncService
 from app.services.kis_order_validation_service import KisOrderValidationService
 from app.services.automation_execution_authority_service import (
     AutomationExecutionAuthorityService,
@@ -538,8 +538,8 @@ class AutomationSchedulerService(SchedulerService):
                                              now=now, owner_user_id=user_id)
 
     def _plan_maintenance(self, now):
-        schedule = self._selected_profile_schedule(now)
         self._task_supervisor.launch('order-sync', lambda: self._run_automatic_order_sync_once(now), timeout=60)
+        schedule = self._selected_profile_schedule(now)
         # Dispatch synchronously inside its single-flight lane: do not enqueue
         # retry Futures every poll while the previous retry is still blocked.
         self._task_supervisor.launch('exit-retries',
@@ -745,17 +745,10 @@ class AutomationSchedulerService(SchedulerService):
     def _run_automatic_order_sync_once(self, now_kst: datetime | None = None) -> dict[str, Any]:
         db = SessionLocal()
         try:
-            service = self._profile_buy_scheduler_service(db)
-            sync_service = getattr(service, 'order_sync_service', None)
-            if not callable(getattr(sync_service, 'sync_submitted_orders', None)):
-                return {'status': 'skipped', 'reason': 'order_sync_unavailable', 'synced_count': 0}
-            rows = sync_service.sync_submitted_orders(db, limit=20)
+            from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+            result = KisAutomaticOrderReconciliationService().reconcile_all(db, trigger='startup_or_periodic')
             self._last_automatic_sync_at = datetime.now(UTC)
-            return {
-                'status': 'ok',
-                'reason': 'bounded_submitted_order_reconciliation',
-                'synced_count': len(rows),
-            }
+            return result
         except Exception as exc:
             self._last_automatic_sync_at = datetime.now(UTC)
             return {
@@ -1214,6 +1207,10 @@ class AutomationSchedulerService(SchedulerService):
                     return self._entry_slot_position_block("position_state_refresh_pending", status="retry_pending")
                 owned_exit_retry = pending_exit_retry
 
+            from app.services.kis_automatic_order_reconciliation_service import KisAutomaticOrderReconciliationService
+            sync_client = getattr(self._profile_buy_scheduler_service(db), 'client', None)
+            KisAutomaticOrderReconciliationService(now_provider=lambda: now_kst).reconcile_account(
+                db, client=sync_client, trigger='pre_entry')
             try:
                 positions = self._positions_first(db)
             except Exception as exc:

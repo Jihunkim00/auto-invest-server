@@ -82,6 +82,15 @@ def test_verified_order14_repair_unblocks_next_real_slot_with_account_isolation(
     with SessionLocal() as db:
         unaffected = {row.id: fingerprint(row) for row in db.query(OrderLog).filter(or_(
             OrderLog.owner_user_id.is_(None), OrderLog.owner_user_id != first.user_id)).all()}
+        # The new automatic pre-entry check records its unsuccessful read. A
+        # previously proposed manual plan must fail its fingerprint check.
+        with pytest.raises(ReconciliationBlocked, match='reconciliation_plan_stale'):
+            apply_verified_reconciliation(db, plan, approval_reference='TEST_ONLY_USER_APPROVAL_ORDER14',
+                history=history, snapshot=snapshot, now=harness.clock.now())
+        order = db.get(OrderLog, 14)
+        sync_error_before_repair = order.sync_error
+        assert order.internal_status == 'UNKNOWN_STALE' and sync_error_before_repair
+        plan = propose_reconciliation(order, history=history, snapshot=snapshot, now=harness.clock.now())
         repaired = apply_verified_reconciliation(db, plan, approval_reference='TEST_ONLY_USER_APPROVAL_ORDER14',
             history=history, snapshot=snapshot, now=harness.clock.now())
         order = db.get(OrderLog, 14)
@@ -92,7 +101,7 @@ def test_verified_order14_repair_unblocks_next_real_slot_with_account_isolation(
         audit = db.get(TradeRunLog, repaired['audit_id'])
         assert audit.owner_user_id == first.user_id and audit.order_id == 14
         assert audit.reason == 'broker_terminal_order_verified'
-        assert obj(audit.response_payload)['before']['sync_error'] == 'kis_order_not_found_in_inquiry'
+        assert obj(audit.response_payload)['before']['sync_error'] == sync_error_before_repair
         assert all(fingerprint(db.get(OrderLog, key)) == value for key, value in unaffected.items())
         # The historical SELL is not falsely counted as a trade today.
         risk = first.risk.get_user_risk_state(db, db.get(User, first.user_id), as_of=harness.clock.now())
