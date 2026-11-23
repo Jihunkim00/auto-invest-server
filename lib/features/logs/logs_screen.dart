@@ -1136,7 +1136,12 @@ class _RunHistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final blocked = !run.hasOrder && run.result.toLowerCase() != 'executed';
+    final executionAction = run.executionAction;
+    final executionReason = run.executionReason;
+    final blocked = executionAction == null &&
+        run.result.toLowerCase() != 'sell_ready' &&
+        !run.hasOrder &&
+        run.result.toLowerCase() != 'executed';
     final isKisAnalyzeBuy = run.isKisSingleSymbolAnalyzeBuy;
     return Card(
       child: Padding(
@@ -1147,12 +1152,15 @@ class _RunHistoryCard extends StatelessWidget {
             _HistoryHeader(
               title: isKisAnalyzeBuy
                   ? 'Single Symbol Analyze & Buy \u00B7 ${run.symbol}'
-                  : '${run.symbol} - ${run.statusLine}',
+                  : executionAction != null
+                      ? run.symbol
+                      : '${run.symbol} - ${run.statusLine}',
               subtitle: isKisAnalyzeBuy
                   ? '${_runResultLabel(run)} \u00B7 ${_runOrderLabel(run)}'
                   : '${run.provider.toUpperCase()} / ${run.market.toUpperCase()} / ${run.triggerSource} / ${run.mode}',
               badge: StatusBadge(
-                text: run.result,
+                text:
+                    executionAction != null ? run.result.toUpperCase() : run.result,
                 active: run.result.toLowerCase() == 'executed',
                 alert: false,
               ),
@@ -1161,12 +1169,18 @@ class _RunHistoryCard extends StatelessWidget {
             _BadgeWrap(labels: [run.sourceLabel, ...run.safetyBadges]),
             const SizedBox(height: 10),
             Text(
-              _runTimelineSentence(run),
+              executionAction == null
+                  ? _runTimelineSentence(run)
+                  : 'Decision: ${_fallback(run.reason, run.result)}',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (executionAction != null)
+              Text(executionReason == null
+                  ? 'Order execution: $executionAction'
+                  : 'Order execution: $executionAction \u00B7 $executionReason'),
             if (run.isOperationTest4Slot) ...[
               const SizedBox(height: 10),
               _OperationTest4SlotSummary(run: run),

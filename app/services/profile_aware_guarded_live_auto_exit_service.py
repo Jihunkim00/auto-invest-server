@@ -22,6 +22,8 @@ from app.db.models import (
 from app.schemas.strategy_live_auto_exit import (
     ProfileAwareGuardedLiveAutoExitRunRequest,
 )
+from app.services.account_trading_limit_service import AccountTradingLimitError
+from app.services.kis_order_account_scope import resolve_position_account_scope
 from app.services.kis_order_sync_service import KisOrderSyncService
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
 from app.services.kis_order_validation_service import (
@@ -1145,8 +1147,24 @@ class ProfileAwareGuardedLiveAutoExitService:
         internal_status: str,
         safety: dict[str, Any],
     ) -> OrderLog:
+        profile_owner_id = _safe_int(profile.get("owner_user_id"))
+        order_owner_id = profile_owner_id
+        if (
+            profile_owner_id is not None
+            and self.client is not None
+            and getattr(self.client, "user_id", None) is None
+        ):
+            try:
+                account = resolve_position_account_scope(db, client=self.client).account
+            except AccountTradingLimitError:
+                # Keep the requested owner so the execution gate records the rejection.
+                pass
+            else:
+                if account.legacy_admin and account.owner_user_id == profile_owner_id:
+                    order_owner_id = None
+
         row = OrderLog(
-            owner_user_id=_safe_int(profile.get("owner_user_id")),
+            owner_user_id=order_owner_id,
             profile_id=_safe_int(profile.get("id") or profile.get("profile_id")),
             profile_key=str(profile.get("profile_key") or "").strip() or None,
             profile_name=str(profile.get("display_name") or profile.get("profile_name") or "") or None,
@@ -1175,6 +1193,7 @@ class ProfileAwareGuardedLiveAutoExitService:
                     "operator_trigger_source": run_request.trigger_source,
                     "active_profile": _profile_name(profile),
                     "profile_key": profile.get("profile_key"),
+                    "profile_owner_user_id": profile_owner_id,
                     "profile_name": profile.get("display_name") or profile.get("profile_name"),
                     "profile_provider": profile.get("provider") or PROVIDER,
                     "profile_market": profile.get("market") or MARKET,
@@ -1448,6 +1467,7 @@ class ProfileAwareGuardedLiveAutoExitService:
             symbol=str(candidate.get("symbol") or ""),
             qty=int(plan["quantity"]),
             now=now_utc,
+            live_only=True,
         )
         execution_guard = execution.get('guard')
         if isinstance(execution_guard, dict) and isinstance(

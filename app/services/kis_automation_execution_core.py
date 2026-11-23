@@ -281,17 +281,19 @@ class KisAutomationExecutionCore:
         qty: int,
         submitter: Callable[[], dict[str, Any]] | None = None,
         now: datetime | None = None,
+        live_only: bool = False,
     ) -> dict[str, Any]:
         authority = self._execution_authority(db)
+        mode = authority.get("automation_mode")
 
-        if authority.get("automation_mode") == "off":
+        if mode == "off" or (live_only and mode != "live"):
             return self._blocked(
                 db,
                 order,
                 {
                     "allowed": False,
-                    "reason": "automation_mode_off",
-                    "automation_mode": "off",
+                    "reason": "automation_mode_off" if mode == "off" else "automation_mode_not_live",
+                    "automation_mode": mode,
                 },
             )
 
@@ -315,7 +317,7 @@ class KisAutomationExecutionCore:
             order.remaining_qty = effective_qty
             db.flush()
 
-        if guard.get("allowed") and authority.get("automation_mode") == "test":
+        if guard.get("allowed") and mode == "test":
             return self._simulate_market(
                 db,
                 order=order,
@@ -338,6 +340,7 @@ class KisAutomationExecutionCore:
                 submitter=submitter or self._broker_sell(symbol, effective_qty),
                 now=now,
                 guard=guard,
+                live_exit=live_only,
             )
         )
 
@@ -572,6 +575,7 @@ class KisAutomationExecutionCore:
         submitter: Callable[[], dict[str, Any]],
         now: datetime | None,
         guard: dict[str, Any],
+        live_exit: bool = False,
     ) -> dict[str, Any]:
         authority = self._execution_authority(db)
 
@@ -594,6 +598,14 @@ class KisAutomationExecutionCore:
                     ),
                 },
             )
+
+        if live_exit:
+            flags = authority.get("legacy_flags") or {}
+            if flags.get("dry_run") or flags.get("kill_switch"):
+                return self._blocked(db, order, {
+                    "allowed": False,
+                    "reason": "dry_run_enabled" if flags.get("dry_run") else "kill_switch_enabled",
+                })
 
         now_utc = _aware_utc(now or self.now_provider())
 

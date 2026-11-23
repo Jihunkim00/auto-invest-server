@@ -26,6 +26,8 @@ class TradingLogItem {
     this.realOrderSubmitted,
     this.brokerSubmitCalled,
     this.manualSubmitCalled,
+    this.executionAction,
+    this.executionReason,
     this.source = '',
     this.sourceType,
     this.exitTrigger,
@@ -76,6 +78,8 @@ class TradingLogItem {
   final bool? realOrderSubmitted;
   final bool? brokerSubmitCalled;
   final bool? manualSubmitCalled;
+  final String? executionAction;
+  final String? executionReason;
   final String source;
   final String? sourceType;
   final String? exitTrigger;
@@ -168,6 +172,7 @@ class TradingLogItem {
       !isKisLimitedAutoBuy &&
       !isKisSchedulerLive;
   String get sourceLabel {
+    if (triggerSource == 'position_exit_monitor') return 'KIS POSITION EXIT';
     if (isOperationTest4Slot) return 'KIS TEST4 LIVE';
     if (isKisBuyShadow) return 'KIS BUY SHADOW';
     if (isKisSingleSymbolAnalyzeBuy) return 'Single Symbol Analyze & Buy';
@@ -199,6 +204,12 @@ class TradingLogItem {
       brokerSubmitCalled: brokerSubmitCalled,
       manualSubmitCalled: manualSubmitCalled,
     );
+    if (triggerSource == 'position_exit_monitor' &&
+        executionAction != null &&
+        executionAction != 'NOT_ATTEMPTED') {
+      labels.remove('PREFLIGHT ONLY');
+      if (brokerSubmitCalled == true) labels.remove('NO BROKER SUBMIT');
+    }
     if (source == 'kis_live_exit_preflight') {
       _addUnique(labels, 'EXIT PREFLIGHT');
       _addUnique(labels, 'PREFLIGHT ONLY');
@@ -348,6 +359,8 @@ class TradingLogItem {
       realOrderSubmitted: _boolValue(json['real_order_submitted']),
       brokerSubmitCalled: _boolValue(json['broker_submit_called']),
       manualSubmitCalled: _boolValue(json['manual_submit_called']),
+      executionAction: _nullableString(json['execution_action']),
+      executionReason: _nullableString(json['execution_reason']),
       source: _stringValue(json['source'], fallback: ''),
       sourceType: _nullableString(json['source_type']),
       exitTrigger: _nullableString(json['exit_trigger']),

@@ -395,6 +395,8 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         "action": str(action or "hold"),
         "result": row.result,
         "reason": reason,
+        "execution_action": response_payload.get("execution_action"),
+        "execution_reason": response_payload.get("execution_reason"),
         "related_order_id": row.order_id,
         "order_id": row.order_id,
         "signal_id": row.signal_id,

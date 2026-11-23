@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.core.enums import InternalOrderStatus
 from app.db.database import get_db
-from app.db.models import OrderLog
+from app.db.models import OrderLog, PositionLifecycle, TradeRunLog
 from app.main import app
 from app.services.automation_profile_buy_scheduler_service import (
     AutomationProfileBuySchedulerService,
@@ -23,6 +23,7 @@ from app.tests.integration.test_kis_automation_scheduler_registration import (
 )
 from app.tests.integration.test_kis_automation_scheduler_replay import (
     CUSTOM_PROFILE_KEY,
+    FakeKisClient,
     SYMBOL,
     UTC_NOW,
     build_harness,
@@ -106,6 +107,131 @@ def test_canonical_stop_loss_sells_current_broker_quantity_and_skips_buy(
     assert harness.broker.buy_calls == []
     assert result['profile_buy']['reason'] == 'position_management_priority_buy_skipped'
     assert sell['safety']['manual_submit_called'] is False
+
+
+@pytest.mark.parametrize(('failure', 'block_reason'), [
+    (None, None),
+    ('positions', 'position_data_unavailable'),
+    ('credentials', 'account_scope_mismatch'),
+    ('environment', 'account_scope_mismatch'),
+    ('mode', 'automation_mode_not_live'),
+    ('kill_switch', 'kill_switch_enabled'),
+    ('dry_run', 'dry_run_enabled'),
+])
+def test_admin_profile_stop_loss_monitor_uses_legacy_order_scope(
+    db_session, monkeypatch, failure, block_reason,
+):
+    from app.brokers.base import KisApiError
+    from app.routes.history import _serialize_run
+    from app.services import automation_scheduler_service
+    from app.services.kis_order_validation_service import KisOrderValidationService
+
+    now = datetime(2026, 11, 23, 4, 0, tzinfo=UTC)
+    symbol = '036460'
+    harness, scheduler = _canonical_position_harness(db_session, monkeypatch, current_price=35250)
+    harness.runtime.update_settings(db_session, {'scheduler_enabled': True})
+    harness.clock.current = now
+    harness.client.candidates = [candidate(symbol=symbol, price=35250)]
+    harness.client.positions[0].update(
+        symbol=symbol, avg_entry_price=38350, cost_basis=38350 * 6,
+    )
+    profile = harness.profiles.get(db_session, CUSTOM_PROFILE_KEY)
+    profile.id = 5
+    profile.owner_user_id = 1
+    position = PositionLifecycle(
+        id=5, owner_user_id=None, entry_order_id=-1, symbol=symbol,
+        entry_price=38350, cost_basis=38350 * 6, quantity=6, status='open',
+        opened_at=now - timedelta(days=3), stop_loss_threshold_pct=2.0,
+        take_profit_threshold_pct=8.0,
+    )
+    db_session.add(position)
+    if failure is None:
+        db_session.add(OrderLog(
+            id=97, broker='kis', market='KR', symbol=symbol, side='sell',
+            order_type='market', qty=6, owner_user_id=1, profile_id=5,
+            profile_key=CUSTOM_PROFILE_KEY,
+            internal_status=InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+            error_message='account_scope_mismatch', created_at=now - timedelta(minutes=30),
+        ))
+    db_session.commit()
+    monkeypatch.setattr(automation_scheduler_service, 'KisClient', lambda *_: harness.client)
+
+    # Inject a read failure or a mode change after the initial live check.
+    class ValidationFakeKisClient(FakeKisClient):
+        def list_positions(self):
+            if failure == 'positions':
+                raise KisApiError('fake KIS balance unavailable')
+            if failure == 'mode':
+                harness.runtime.update_settings(db_session, {'automation_mode': 'test'})
+            return super().list_positions()
+
+        def build_domestic_order_payload(self, **kwargs):
+            return {'CANO': self.settings.kis_account_no}
+
+        def domestic_cash_order_tr_id(self, side):
+            return 'fake-order-tr'
+
+    validation_client = ValidationFakeKisClient(harness.clock, harness.client.candidates)
+    validation_client.auth_manager = SimpleNamespace(require_configured=lambda: None)
+    validation_client.positions = harness.client.positions
+    harness.profile_buy.validation_service = KisOrderValidationService(
+        validation_client, session_service=harness.market_sessions,
+    )
+    if failure in {'credentials', 'environment'}:
+        override = {'kis_app_secret': 'fake-wrong-secret'} if failure == 'credentials' else {'kis_env': 'paper'}
+        harness.client.settings = harness.client.settings.model_copy(update=override)
+    if failure in {'kill_switch', 'dry_run'}:
+        def jit_open_orders(db):
+            harness.runtime.update_settings(db, {failure: True})
+            return harness.client.list_open_orders()
+
+        harness.profile_buy.execution_core.open_orders_loader = jit_open_orders
+
+    result = scheduler._run_position_exit_monitor_once(now)
+    assert result['status'] == 'checked', result.get('reason')
+    item = result['items'][0]
+    assert item['lifecycle_id'] == 5
+    assert item['strategy_action'] == 'SELL_READY'
+    run = db_session.get(TradeRunLog, item['run']['run_id'])
+    history = _serialize_run(run)
+    assert history['result'] == 'sell_ready'
+    assert history['reason'] == 'stop_loss_triggered'
+    assert history['execution_action'] == item['execution_action']
+    assert history['execution_reason'] == item['execution_reason']
+    exit_service = scheduler._profile_guarded_live_auto_exit_service(db_session)
+    replay = exit_service.run_scheduler_once(db_session, scheduler_slot=item['scheduler_slot'], symbol=symbol, now=now)
+    assert replay['safety']['idempotent_replay'] is True
+    assert harness.client.external_kis_submit_count == validation_client.external_kis_submit_count == 0
+    position = db_session.get(PositionLifecycle, 5)
+    if failure:
+        assert history['execution_action'] == 'BLOCKED'
+        assert history['execution_reason'] == block_reason
+        assert history['broker_submit_called'] is history['real_order_submitted'] is False
+        assert harness.broker.sell_calls == []
+        assert position.status == 'open'
+    if failure == 'positions':
+        assert db_session.query(OrderLog).count() == 0
+    elif failure:
+        order = db_session.query(OrderLog).one()
+        assert order.owner_user_id == (1 if block_reason == 'account_scope_mismatch' else None)
+        assert order.internal_status == InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+        assert order.broker_order_id is order.submitted_at is order.filled_at is None
+        assert not order.filled_qty
+    else:
+        assert item['execution_action'] == 'SUBMITTED', item['execution_reason']
+        order = db_session.query(OrderLog).filter(OrderLog.id != 97).one()
+        assert order.owner_user_id is position.owner_user_id is None
+        assert (order.profile_id, order.profile_key) == (5, CUSTOM_PROFILE_KEY)
+        assert json.loads(order.request_payload)['profile_owner_user_id'] == 1
+        assert replay['owner_user_id'] == 1
+        assert order.internal_status == InternalOrderStatus.FILLED.value
+        assert order.filled_qty == 6
+        assert harness.sync.calls == [order.id]
+        assert harness.broker.sell_calls == [{'symbol': symbol, 'qty': 6}]
+        old_order = db_session.get(OrderLog, 97)
+        assert old_order.owner_user_id == 1
+        assert old_order.internal_status == InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+        assert old_order.broker_order_id is old_order.submitted_at is None
 
 
 def test_canonical_take_profit_uses_eight_percent_and_full_exit(

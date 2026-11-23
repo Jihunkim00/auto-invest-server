@@ -35,6 +35,70 @@ import 'automation_soak_test_model_test.dart';
 import 'broker_sync_watchdog_model_test.dart';
 
 void main() {
+  testWidgets('Position exit decision and blocked execution appear separately',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 16000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        orders: const [],
+        signals: const [],
+        runs: [
+          TradingLogItem.fromJson({
+            'id': 488,
+            'provider': 'kis',
+            'market': 'KR',
+            'symbol': '036460',
+            'trigger_source': 'position_exit_monitor',
+            'mode': 'kis_position_management_preflight',
+            'action': 'sell',
+            'result': 'sell_ready',
+            'reason': 'stop_loss_triggered',
+            'execution_action': 'BLOCKED',
+            'execution_reason': 'account_scope_mismatch',
+            'related_order_id': 93,
+            'broker_submit_called': false,
+            'real_order_submitted': false,
+            'created_at': '2026-11-23T06:00:17Z',
+          }),
+        ],
+      ),
+      autoload: false,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: LogsScreen(controller: controller)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('SELL_READY'), findsOneWidget);
+    expect(find.text('Decision: stop_loss_triggered'), findsOneWidget);
+    expect(
+      find.text('Order execution: BLOCKED \u00B7 account_scope_mismatch'),
+      findsOneWidget,
+    );
+    final runCard = find.ancestor(
+      of: find.text('Decision: stop_loss_triggered'),
+      matching: find.byType(Card),
+    );
+    expect(
+      find.descendant(of: runCard, matching: find.text('NO BROKER SUBMIT')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: runCard, matching: find.text('REAL ORDER SUBMITTED')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: runCard, matching: find.textContaining('No trade trigger')),
+      findsNothing,
+    );
+  });
+
   testWidgets('Logs screen shows backend activity source and safety labels',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 16000);

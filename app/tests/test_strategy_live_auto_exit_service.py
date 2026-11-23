@@ -258,18 +258,18 @@ def _bind_regular_exit_account(db_session, monkeypatch, service):
     from app.services.automation_profile_service import AutomationProfileService
     from app.services.broker_credential_crypto_service import BrokerCredentialCryptoService
     monkeypatch.setattr(get_settings(), 'broker_credential_master_key', Fernet.generate_key().decode())
-    db_session.add(User(id=41, username='exit-owner', role='user', enabled=True))
+    db_session.add(User(id=2, username='exit-owner', role='user', enabled=True))
     db_session.commit()
     profile = AutomationProfileService().create(db_session,
         AutomationProfileWriteRequest(profile_key='admin_kis_primary', name='Renamed display label'),
-        owner_user_id=41)
+        owner_user_id=2)
     db_session.get(StrategyProfile, profile['id']).id = 27
     credentials = dict(environment='live', account_no='33334444', account_product_code='01',
                        app_key='fake-user-key', app_secret='fake-user-secret')
-    db_session.add(UserBrokerCredential(user_id=41, provider='kis', environment='live',
+    db_session.add(UserBrokerCredential(user_id=2, provider='kis', environment='live',
         encrypted_payload=BrokerCredentialCryptoService().encrypt(credentials), encryption_version=1))
     db_session.commit()
-    service.client.user_id = 41
+    service.client.user_id = 2
     service.client.credentials = credentials
 
 
@@ -611,7 +611,7 @@ def test_scheduler_retry_uses_fresh_position_state_and_a_distinct_request_id(
     _bind_regular_exit_account(db_session, monkeypatch, service)
     profile = {
         "id": 27,
-        "owner_user_id": 41,
+        "owner_user_id": 2,
         "profile_key": "admin_kis_primary",
         "profile_name": "admin_kis_primary",
         "display_name": "Current display label",
@@ -677,11 +677,12 @@ def test_scheduler_retry_uses_fresh_position_state_and_a_distinct_request_id(
     assert db_session.query(StrategyLiveAutoExitAttempt).count() == 2
 
 
-@pytest.mark.parametrize("reject_at_submit_guard", [False, True], ids=["submitted", "safety-rejected"])
+@pytest.mark.parametrize("failure", [None, "positions_unavailable", "account_scope_mismatch"])
 def test_scheduler_order_log_keeps_owner_and_canonical_profile_context(
     db_session,
     monkeypatch,
-    reject_at_submit_guard,
+    fake_kis_admin_credentials,
+    failure,
 ):
     service, broker, _validation = trusted_scheduler_exit_service(
         db_session,
@@ -691,7 +692,7 @@ def test_scheduler_order_log_keeps_owner_and_canonical_profile_context(
     _bind_regular_exit_account(db_session, monkeypatch, service)
     service._active_profile = lambda db, now=None: {
         "id": 27,
-        "owner_user_id": 41,
+        "owner_user_id": 2,
         "profile_key": "admin_kis_primary",
         "profile_name": "legacy profile label",
         "display_name": "Renamed display label",
@@ -700,7 +701,13 @@ def test_scheduler_order_log_keeps_owner_and_canonical_profile_context(
         "provider": "kis",
         "market": "KR",
     }
-    if reject_at_submit_guard:
+    if failure == "account_scope_mismatch":
+        from app.services.auth_service import ensure_admin_user
+
+        ensure_admin_user(db_session)
+        service.client.user_id = None
+        service.client.settings = fake_kis_admin_credentials
+    if failure == "positions_unavailable":
         def reject_sell(db, **kwargs):
             return {
                 "submitted": False,
@@ -725,21 +732,24 @@ def test_scheduler_order_log_keeps_owner_and_canonical_profile_context(
         symbol="005930",
         now=datetime(2026, 7, 30, 9, 30, tzinfo=ZoneInfo("Asia/Seoul")),
         exit_cycle_key="automation_scheduler:sell:admin_kis_primary:2026-07-30:09:30:005930",
-        retry_index=2 if reject_at_submit_guard else 0,
+        retry_index=2 if failure == "positions_unavailable" else 0,
     )
     order = db_session.query(OrderLog).filter(OrderLog.side == "sell").one()
 
-    assert order.owner_user_id == 41
+    assert order.owner_user_id == result["owner_user_id"] == 2
     assert order.profile_id == 27
     assert order.profile_key == "admin_kis_primary"
     assert order.profile_name == "Renamed display label"
-    if reject_at_submit_guard:
+    if failure:
         assert result["status"] == "blocked"
+        assert result["block_reason"] == failure
         assert order.internal_status == InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
-        assert result["safety"]["read_failure"]["retry_index"] == 2
-        assert result["safety"]["read_failure"]["max_retries"] == 3
-        assert order.owner_user_id is not None
+        assert result["broker_submit_called"] is result["real_order_submitted"] is False
+        assert order.broker_order_id is order.submitted_at is None
         assert broker.calls == []
+        if failure == "positions_unavailable":
+            assert result["safety"]["read_failure"]["retry_index"] == 2
+            assert result["safety"]["read_failure"]["max_retries"] == 3
     else:
         assert result["status"] == "submitted"
         assert order.client_order_id == result["client_request_id"]
