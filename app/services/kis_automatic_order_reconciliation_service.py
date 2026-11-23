@@ -1,7 +1,6 @@
 """All-account orchestration. Broker access is exclusively execution-history GETs.
 
-No submission, cancellation, reservation reset, slot replay or position mutation
-is performed here. Existing execution/risk/lifecycle gates remain authoritative.
+No submission, cancellation, reservation reset or slot replay is performed here.
 """
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import or_, update
+from sqlalchemy import DateTime, String, cast, or_, update
 from sqlalchemy.exc import IntegrityError
 
 from app.brokers.kis_account_execution_reader import (
@@ -22,6 +21,7 @@ from app.db.models import KisOrderReconciliationState, OrderLog, TradeRunLog, Us
 from app.services.account_trading_limit_service import AccountTradingLimitError
 from app.services.kis_order_account_scope import resolve_order_account_scope
 from app.services.kis_order_mapper import map_kis_order_row
+from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.kis_order_sync_service import (
     KR_TZ, OPEN_KIS_INTERNAL_STATUSES, KisOrderSyncService, _submitted_kst_date,
@@ -29,6 +29,14 @@ from app.services.kis_order_sync_service import (
 
 TERMINAL = {'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED'}
 MODE = 'kis_auto_order_reconciliation'
+ORDER_COMPARISON_FIELDS = (
+    'internal_status', 'filled_qty', 'remaining_qty', 'last_synced_at',
+    'kis_odno', 'broker_order_id', 'requested_qty', 'qty', 'submitted_at',
+    'symbol', 'side', 'owner_user_id', 'request_payload', 'profile_id',
+    'profile_key', 'created_at', 'last_sync_payload', 'broker_status',
+    'broker_order_status', 'filled_at', 'market', 'broker', 'updated_at',
+    'filled_avg_price', 'avg_fill_price', 'response_payload', 'sync_error', 'error_message',
+)
 
 
 def _utc(value):
@@ -211,20 +219,27 @@ class KisAutomaticOrderReconciliationService:
             query = _orders(db, owner_user_id)
             if order_id is not None:
                 query = query.filter(OrderLog.id == order_id)
-            orders = query.order_by(OrderLog.last_synced_at.asc(), OrderLog.id.asc()).limit(20).all()
+            # Keep the database's read-time timestamp representation for SQLite
+            # CAS. ORM datetimes still drive UTC calculations; rebinding them
+            # would add ".000000" to a row stored at whole-second precision.
+            columns = {}
+            sqlite = db.get_bind().dialect.name == 'sqlite'
+            for name in ORDER_COMPARISON_FIELDS:
+                column = OrderLog.__table__.c[name]
+                columns[name] = cast(column, String) if sqlite and isinstance(column.type, DateTime) else column
+            orders = query.add_columns(*columns.values()).order_by(
+                OrderLog.last_synced_at.asc(), OrderLog.id.asc(),
+            ).limit(20).all()
             if orders:
                 client = client or self.client_factory(db, owner_user_id)
             budget, histories = self.budget_factory(), {}
-            for order in orders:
+            for order, *original_values in orders:
                 checked += 1
-                before = {name: getattr(order, name) for name in (
-                    'internal_status', 'filled_qty', 'remaining_qty', 'last_synced_at',
-                    'kis_odno', 'broker_order_id', 'requested_qty', 'qty', 'submitted_at',
-                    'symbol', 'side', 'owner_user_id', 'request_payload', 'profile_id', 'profile_key', 'created_at',
-                    'last_sync_payload', 'broker_status', 'broker_order_status', 'filled_at',
-                )}
+                before = dict(zip(columns, original_values))
                 updates = {}
                 reason = None
+                lifecycle_service = None
+                position_snapshot = None
                 try:
                     scope = resolve_order_account_scope(db, order=order, client=client, require_enabled=False)
                     payload = json.loads(order.request_payload or '{}')
@@ -262,10 +277,20 @@ class KisAutomaticOrderReconciliationService:
                               'avg_fill_price', 'filled_avg_price', 'broker_order_status', 'broker_status',
                               'last_synced_at', 'sync_error', 'error_message')
                     updates = {name: getattr(staged, name) for name in fields}
+                    if order.side == 'buy' and mapped.filled_qty:
+                        lifecycle_service = KisPositionLifecycleService(client)
+                        if mapped.internal_status == 'FILLED':
+                            position_snapshot = lifecycle_service.read_buy_link_snapshot(
+                                db, order, now=now.replace(tzinfo=UTC),
+                            )
+                        current_scope = resolve_order_account_scope(db, order=order, client=client, require_enabled=False)
+                        if current_scope != scope:
+                            raise ReconciliationEvidenceError('order_account_mismatch')
                 except Exception as exc:
                     reason = self._reason(exc)
                     failure = reason
                     updates = {'last_synced_at': now, 'sync_error': reason}
+                    lifecycle_service = None
                 evidence = {'scope': key, 'local_order_id': order.id,
                             'trigger': trigger if trigger in {'periodic', 'startup_or_periodic', 'slot', 'pre_entry', 'post_submit'} else 'periodic',
                             'from_status': before['internal_status'],
@@ -278,7 +303,7 @@ class KisAutomaticOrderReconciliationService:
                 if reason is None:
                     # Only allowlisted non-sensitive evidence is persisted.
                     evidence['broker_evidence'] = {k: mapped.raw_payload.get(k) for k in (
-                        'ord_dt', 'pdno', 'sll_buy_dvsn_cd', 'ord_qty', 'tot_ccld_qty',
+                        'ord_dt', 'ord_tmd', 'pdno', 'sll_buy_dvsn_cd', 'ord_qty', 'tot_ccld_qty',
                         'rmn_qty', 'cncl_yn', 'rjct_qty', 'avg_prvs')}
                 try:
                     prior = json.loads(order.last_sync_payload or '{}')
@@ -287,7 +312,7 @@ class KisAutomaticOrderReconciliationService:
                     prior = {}
                 updates['last_sync_payload'] = json.dumps(
                     {**sanitize_kis_payload(prior), 'automatic_reconciliation': evidence}, ensure_ascii=False)
-                conditions = [getattr(OrderLog, name).is_(None) if value is None else getattr(OrderLog, name) == value
+                conditions = [columns[name].is_(None) if value is None else columns[name] == value
                               for name, value in before.items()]
                 lease = db.query(KisOrderReconciliationState).filter_by(scope_key=key, lease_token=token).filter(
                     KisOrderReconciliationState.lease_until > _utc(self.now_provider())).exists()
@@ -297,10 +322,23 @@ class KisAutomaticOrderReconciliationService:
                     db.rollback()
                     failure = 'concurrent_order_change'
                     continue
+                if lifecycle_service is not None:
+                    db.refresh(order)
+                    position_result = lifecycle_service.reconcile_existing_buy_position(
+                        db, order, position_snapshot, evidence['broker_evidence'],
+                    )
+                    if position_result is not None:
+                        evidence['position_reconciliation'] = position_result
+                        if position_result['status'] == 'manual_review_required':
+                            failure = 'position_reconciliation_manual_review'
+                            evidence['reason'] = failure
+                        order.last_sync_payload = json.dumps(
+                            {**sanitize_kis_payload(prior), 'automatic_reconciliation': evidence}, ensure_ascii=False,
+                        )
                 db.add(TradeRunLog(owner_user_id=owner_user_id, run_key='kis-reconcile-' + uuid.uuid4().hex,
                     trigger_source='automatic_order_reconciliation', mode=MODE, symbol=order.symbol,
-                    stage='done', result='review_required' if reason else 'verified',
-                    reason=reason or 'broker_order_verified', order_id=order.id,
+                    stage='done', result='review_required' if evidence['reason'] else 'verified',
+                    reason=evidence['reason'] or 'broker_order_verified', order_id=order.id,
                     response_payload=json.dumps(evidence, ensure_ascii=False)))
                 db.commit()
                 db.refresh(order)

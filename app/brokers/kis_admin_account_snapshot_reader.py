@@ -88,7 +88,10 @@ def read_admin_account_snapshot(client, *, now: datetime):
         if not symbol:
             raise ExecutionHistoryError('incomplete', 'invalid_response_shape')
         if qty:
-            positions.append({'symbol': symbol, 'qty': qty})
+            position = {'symbol': symbol, 'qty': qty}
+            if row.get('pchs_avg_pric') not in (None, ''):
+                position['avg_entry_price'] = _quantity(row, 'pchs_avg_pric')
+            positions.append(position)
     for row in raw_open:
         symbol, order_id = str(row.get('pdno') or '').strip(), str(row.get('odno') or '').strip()
         side = {'01': 'sell', '02': 'buy'}.get(row.get('sll_buy_dvsn_cd'))

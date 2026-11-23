@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func, insert, literal, select
 from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
@@ -23,7 +25,12 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.market_session_service import MarketSessionService
-from app.services.kis_order_account_scope import assert_lifecycle_owner
+from app.services.kis_order_account_scope import (
+    active_position_rows,
+    assert_lifecycle_owner,
+    has_unlinked_position_buy,
+    position_sell_block_reason,
+)
 
 
 MODE = "kis_position_management"
@@ -70,6 +77,28 @@ SUBMITTED_SELL_STATUSES = {
     InternalOrderStatus.PARTIALLY_FILLED.value,
     InternalOrderStatus.FILLED.value,
 }
+
+
+def insert_kis_position_if_absent(db: Session, lifecycle: PositionLifecycle) -> int | None:
+    """Insert only when both the account holding and entry ID are unclaimed."""
+    table = PositionLifecycle.__table__
+    values = {key: literal(value, type_=table.c[key].type) for key, value in vars(lifecycle).items()
+              if key in table.c}
+    if lifecycle.entry_order_id < 0:
+        # Allocate broker-snapshot IDs in the SQLite insert transaction too.
+        values['entry_order_id'] = select(func.coalesce(func.min(table.c.entry_order_id), 0) - 1).where(
+            table.c.entry_order_id < 0,
+        ).scalar_subquery()
+    available = select(*values.values()).where(
+        ~active_position_rows(db, lifecycle.owner_user_id, lifecycle.symbol).exists(),
+    )
+    if lifecycle.entry_order_id > 0:
+        available = available.where(
+            ~select(table.c.id).where(table.c.entry_order_id == lifecycle.entry_order_id).exists(),
+        )
+    return db.execute(insert(table).from_select(
+        list(values), available,
+    ).returning(table.c.id)).scalar_one_or_none()
 
 
 class KisPositionLifecycleService:
@@ -258,6 +287,11 @@ class KisPositionLifecycleService:
                 "lifecycle": _serialize_lifecycle(existing),
             }
 
+        collision = self.reconcile_existing_buy_position(db, row, None, {})
+        if collision is not None:
+            db.commit()
+            return {"created": False, "reason": collision["status"], **collision}
+
         entry_price = _entry_price(row)
         if entry_price is None or entry_price <= 0:
             return {
@@ -313,17 +347,97 @@ class KisPositionLifecycleService:
             exit_order_id=None,
             last_evaluated_at=None,
         )
-        db.add(lifecycle)
+        saved_id = insert_kis_position_if_absent(db, lifecycle)
+        if saved_id is None:
+            collision = self.reconcile_existing_buy_position(db, row, None, {})
+            db.commit()
+            return {
+                "created": False,
+                "reason": collision["status"] if collision else "lifecycle_already_exists",
+            }
         db.commit()
-        db.refresh(lifecycle)
+        saved = db.get(PositionLifecycle, saved_id)
 
         if not _is_profile_auto_buy_order(row):
             self._disable_new_buy_settings(db)
         return {
             "created": True,
             "reason": "filled_buy_lifecycle_created",
-            "lifecycle": _serialize_lifecycle(lifecycle),
+            "lifecycle": _serialize_lifecycle(saved),
         }
+
+    def read_buy_link_snapshot(self, db: Session, order: OrderLog, *, now: datetime):
+        rows = active_position_rows(db, self.owner_user_id, order.symbol).all()
+        if (len(rows) != 1 or rows[0].entry_source != 'broker_position_snapshot'
+                or rows[0].entry_order_id >= 0):
+            return None
+        try:
+            reader = getattr(self.client, 'read_reconciliation_account_snapshot', None)
+            if callable(reader):
+                return reader(now=now)
+        except Exception:
+            # A verified execution can still be recorded, with a durable HOLD
+            # on the existing lifecycle until the position is reviewed.
+            return None
+        return None
+
+    def reconcile_existing_buy_position(
+        self, db: Session, order: OrderLog, snapshot, broker_evidence: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Link an existing holding in the caller's transaction, without creating one."""
+        if order.owner_user_id != self.owner_user_id:
+            return None
+        rows = active_position_rows(db, self.owner_user_id, order.symbol).populate_existing().all()
+        if not rows or (len(rows) == 1 and rows[0].entry_order_id == order.id):
+            return None
+        for row in rows:
+            assert_lifecycle_owner(db, row, self.owner_user_id)
+        row = rows[0]
+        if len(rows) == 1 and self._buy_link_matches(db, row, order, snapshot, broker_evidence):
+            # Preserve the observation anchor, thresholds, provenance, ID and
+            # logs. The positive entry ID records the verified association.
+            row.entry_order_id = order.id
+            return {'status': 'linked', 'lifecycle_id': row.id}
+        for row in rows:
+            row.manual_review_required = True
+        return {'status': 'manual_review_required', 'lifecycle_ids': [row.id for row in rows]}
+
+    def _buy_link_matches(self, db: Session, row, order, snapshot, evidence) -> bool:
+        if (snapshot is None or order.internal_status != 'FILLED' or order.remaining_qty != 0
+                or row.entry_order_id >= 0 or row.entry_source != 'broker_position_snapshot'
+                or row.status != OPEN or row.exit_order_id is not None or row.manual_review_required):
+            return False
+        try:
+            # ord_tmd is the order time. It only rules out an order submitted
+            # after the already observed holding; we keep the old time anchor.
+            order_time = datetime.strptime(
+                f"{evidence['ord_dt']}{evidence['ord_tmd']}", '%Y%m%d%H%M%S',
+            ).replace(tzinfo=KR_TZ)
+        except (KeyError, TypeError, ValueError):
+            return False
+        if row.opened_at is None or order_time > _aware_utc(row.opened_at):
+            return False
+        positions, open_orders = snapshot
+        matches = [position for position in positions if _order_symbol(position) == row.symbol]
+        if len(matches) != 1:
+            return False
+        quantity = _safe_float_or_none(matches[0].get('qty') or matches[0].get('quantity'))
+        price = _safe_float_or_none(matches[0].get('avg_entry_price'))
+        if quantity is None or quantity <= 0 or quantity != row.quantity or quantity != order.filled_qty:
+            return False
+        fill_price = _entry_price(order)
+        if (price is None or fill_price is None or price <= 0
+                or not math.isclose(price, fill_price, rel_tol=0, abs_tol=0.005)
+                or not math.isclose(price, row.entry_price, rel_tol=0, abs_tol=0.005)
+                or not math.isclose(price * quantity, row.cost_basis or 0, rel_tol=0, abs_tol=0.01)):
+            return False
+        return not (
+            has_unlinked_position_buy(
+                db, owner_user_id=row.owner_user_id, symbol=row.symbol, exclude_order_id=order.id,
+            )
+            or any(_order_symbol(item) == row.symbol for item in open_orders)
+            or self._has_open_or_unknown_sell_order(db, row, [])
+        )
 
     def sync_current_position(
         self,
@@ -462,6 +576,20 @@ class KisPositionLifecycleService:
                 order_id=None,
                 position=None,
             )
+
+        positions = positions if positions is not None else self._broker_positions()
+        matched = _find_position(positions, row.symbol)
+        if matched is not None:
+            position_reason = position_sell_block_reason(
+                db, owner_user_id=self.owner_user_id, symbol=row.symbol,
+                broker_quantity=_safe_float(matched.get('qty') or matched.get('quantity') or matched.get('hold_qty'), 0),
+            )
+            if position_reason:
+                return self._decision_payload(
+                    lifecycle=row, action=MANUAL_REVIEW, result=MANUAL_REVIEW,
+                    reason=position_reason, current_price=_position_current_price(matched),
+                    order_id=row.exit_order_id, position=_position_for_lifecycle(matched, row),
+                )
 
         synced = self.sync_current_position(
             db,
@@ -1331,16 +1459,10 @@ class KisPositionLifecycleService:
             unrealized_pl = _safe_float_or_none(position.get("unrealized_pl"))
             if unrealized_pl is None and current_price is not None and current_price > 0:
                 unrealized_pl = current_price * quantity - cost_basis
-            existing_ids = [
-                int(value)
-                for (value,) in db.query(PositionLifecycle.entry_order_id).all()
-                if value is not None
-            ]
-            synthetic_entry_order_id = min([-1, *existing_ids]) - (1 if any(value < 0 for value in existing_ids) else 0)
             lifecycle = PositionLifecycle(
                 owner_user_id=self.owner_user_id,
                 symbol=symbol,
-                entry_order_id=synthetic_entry_order_id,
+                entry_order_id=-1,
                 entry_source="broker_position_snapshot",
                 entry_time_source="broker_position_first_observed_at_fallback",
                 entry_price=float(entry_price),
@@ -1367,9 +1489,8 @@ class KisPositionLifecycleService:
                     else DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL * 100.0
                 ),
             )
-            db.add(lifecycle)
+            insert_kis_position_if_absent(db, lifecycle)
             db.commit()
-            db.refresh(lifecycle)
             active_symbols.add(symbol)
         return unmanaged
 
@@ -1473,7 +1594,7 @@ class KisPositionLifecycleService:
             "symbol": lifecycle.symbol if lifecycle is not None else "POSITIONS",
             "entry_order_id": (
                 lifecycle.entry_order_id
-                if lifecycle is not None and lifecycle.entry_source != "broker_position_snapshot"
+                if lifecycle is not None and lifecycle.entry_order_id > 0
                 else None
             ),
             "entry_source": lifecycle.entry_source if lifecycle is not None else None,
@@ -2123,7 +2244,7 @@ def _serialize_lifecycle(row: PositionLifecycle) -> dict[str, Any]:
         "id": row.id,
         "symbol": row.symbol,
         "entry_order_id": (
-            row.entry_order_id if row.entry_source != "broker_position_snapshot" else None
+            row.entry_order_id if row.entry_order_id > 0 else None
         ),
         "entry_source": row.entry_source,
         "entry_time_source": row.entry_time_source,

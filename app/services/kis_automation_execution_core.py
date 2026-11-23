@@ -19,7 +19,7 @@ from app.services.account_snapshot_retry import kis_exit_read_failure_diagnostic
 from app.db.models import OrderLog, StrategyProfile
 from app.services.account_trading_limit_service import AccountTradingLimitError, AccountTradingLimitService
 from app.services.kis_order_account_scope import (
-    KisOrderAccountScope, order_matches_account, resolve_order_account_scope,
+    KisOrderAccountScope, order_matches_account, position_sell_block_reason, resolve_order_account_scope,
 )
 from app.services.kis_manual_order_service import KisManualOrderSubmitRequest
 from app.services.kis_order_validation_service import (
@@ -1172,15 +1172,10 @@ class KisAutomationExecutionCore:
                 ),
             }
 
-        held = next(
-            (
-                item
-                for item in positions
-                if _symbol(item)
-                == str(symbol).strip().upper()
-            ),
-            None,
-        )
+        matches = [item for item in positions if _symbol(item) == str(symbol).strip().upper()]
+        if len(matches) > 1:
+            return {'allowed': False, 'reason': 'position_lifecycle_quantity_mismatch'}
+        held = matches[0] if matches else None
         held_qty = int(_position_qty(held)) if held is not None else 0
 
         if (
@@ -1198,6 +1193,14 @@ class KisAutomationExecutionCore:
         )
         if duplicate:
             return duplicate
+        try:
+            position_reason = position_sell_block_reason(
+                db, owner_user_id=order.owner_user_id, symbol=symbol, broker_quantity=_position_qty(held),
+            )
+        except AccountTradingLimitError as exc:
+            position_reason = str(exc)
+        if position_reason:
+            return {'allowed': False, 'reason': position_reason}
 
         return {
             "allowed": True,

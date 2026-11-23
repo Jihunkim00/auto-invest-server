@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.config import get_settings
 from app.db.models import OrderLog, PositionExitRetryJob, PositionLifecycle, StrategyProfile, User, UserBrokerCredential
@@ -161,6 +161,52 @@ def assert_lifecycle_owner(db: Session, row: PositionLifecycle, owner_user_id: i
     entry = db.get(OrderLog, row.entry_order_id) if row.entry_order_id > 0 else None
     if entry is not None and entry.owner_user_id != row.owner_user_id:
         raise AccountTradingLimitError('account_scope_mismatch')
+
+
+def active_position_rows(db: Session, owner_user_id: int | None, symbol: str):
+    return db.query(PositionLifecycle).filter(
+        PositionLifecycle.owner_user_id == owner_user_id,
+        PositionLifecycle.symbol == symbol.strip().upper(),
+        PositionLifecycle.status.in_(['open', 'closing']),
+    )
+
+
+def has_unlinked_position_buy(
+    db: Session, *, owner_user_id: int | None, symbol: str, exclude_order_id: int | None = None,
+) -> bool:
+    linked = db.query(PositionLifecycle.id).filter(
+        PositionLifecycle.owner_user_id == owner_user_id,
+        PositionLifecycle.entry_order_id == OrderLog.id,
+    ).exists()
+    orders = db.query(OrderLog.id).filter(
+        OrderLog.owner_user_id == owner_user_id, OrderLog.broker == 'kis',
+        OrderLog.side == 'buy', OrderLog.symbol == symbol.strip().upper(), ~linked,
+        or_(OrderLog.market == 'KR', OrderLog.market.is_(None)),
+        or_(OrderLog.filled_qty > 0, OrderLog.internal_status.in_([
+            'FILLED', 'REQUESTED', 'PENDING_SUBMIT', 'SUBMITTED', 'ACCEPTED',
+            'PENDING', 'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED',
+        ])),
+    )
+    if exclude_order_id is not None:
+        orders = orders.filter(OrderLog.id != exclude_order_id)
+    return orders.first() is not None
+
+
+def position_sell_block_reason(
+    db: Session, *, owner_user_id: int | None, symbol: str, broker_quantity: float,
+) -> str | None:
+    rows = active_position_rows(db, owner_user_id, symbol).populate_existing().all()
+    if not rows:
+        return None
+    for row in rows:
+        assert_lifecycle_owner(db, row, owner_user_id)
+    if len(rows) != 1 or rows[0].manual_review_required:
+        return 'position_lifecycle_manual_review'
+    if rows[0].quantity != broker_quantity:
+        return 'position_lifecycle_quantity_mismatch'
+    if has_unlinked_position_buy(db, owner_user_id=owner_user_id, symbol=symbol):
+        return 'position_lifecycle_reconciliation_pending'
+    return None
 
 
 def kis_client_cache_scope(client: Any) -> str | None:

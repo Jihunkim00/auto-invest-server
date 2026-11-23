@@ -278,7 +278,14 @@ def test_qualified_kis_live_order_is_submitted_once_and_owned_with_partial_lifec
     lifecycle = db_session.query(PositionLifecycle).one()
     assert lifecycle.owner_user_id == user.id
     assert lifecycle.quantity == 2
-    assert db_session.query(TradeRunLog).one().owner_user_id == user.id
+    runs = db_session.query(TradeRunLog).all()
+    assert len(runs) == 2
+    submission, reconciliation = sorted(runs, key=lambda run: run.id)
+    assert (submission.trigger_source, submission.result) == ('user_run_once', 'submitted')
+    assert (reconciliation.trigger_source, reconciliation.result, reconciliation.reason) == (
+        'automatic_order_reconciliation', 'review_required', 'account_scope_unavailable',
+    )
+    assert all(run.owner_user_id == user.id and run.order_id == order.id for run in runs)
     assert db_session.query(SignalLog).one().owner_user_id == user.id
     assert "user-" not in response.text
 

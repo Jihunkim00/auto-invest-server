@@ -113,6 +113,7 @@ class UserKisOrderSyncService(KisOrderSyncService):
                     PositionLifecycle.status.in_(['open', 'closing']),
                 ).first()
                 if active is not None:
+                    active.manual_review_required = True
                     outcome = {'status': 'review_required', 'reason': 'existing_position_requires_review'}
                 elif not held:
                     # A historical buy may already have been sold (e.g. #13).
@@ -125,8 +126,11 @@ class UserKisOrderSyncService(KisOrderSyncService):
                         db, user=db.get(User, order.owner_user_id), order=order,
                         now=order.submitted_at or order.created_at or datetime.now(UTC),
                     )
-                    lifecycle = db.query(PositionLifecycle).filter_by(entry_order_id=order.id).one()
-                    outcome = {'status': 'linked', 'lifecycle_id': lifecycle.id}
+                    lifecycle = db.query(PositionLifecycle).filter_by(entry_order_id=order.id).one_or_none()
+                    outcome = (
+                        {'status': 'linked', 'lifecycle_id': lifecycle.id} if lifecycle is not None
+                        else {'status': 'review_required', 'reason': 'existing_position_requires_review'}
+                    )
         # Use the existing user position registration, without executing a
         # trading cycle or modifying administrator lifecycle/settings state.
         payload = json.loads(order.last_sync_payload or '{}')

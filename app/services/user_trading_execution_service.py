@@ -1896,21 +1896,33 @@ class UserTradingExecutionService:
         entry_price = float(order.avg_fill_price or order.filled_avg_price or 0.0)
         if entry_price <= 0:
             return
-        db.add(
-            PositionLifecycle(
-                owner_user_id=int(user.id),
-                symbol=order.symbol,
-                entry_order_id=order.id,
-                entry_price=entry_price,
-                cost_basis=entry_price * filled_qty,
-                quantity=filled_qty,
-                status="open",
-                opened_at=order.filled_at or now,
-                last_price=entry_price,
-                stop_loss_threshold_pct=0.02,
-                take_profit_threshold_pct=0.04,
-            )
+        lifecycle = PositionLifecycle(
+            owner_user_id=int(user.id),
+            symbol=order.symbol,
+            entry_order_id=order.id,
+            entry_price=entry_price,
+            cost_basis=entry_price * filled_qty,
+            quantity=filled_qty,
+            status="open",
+            opened_at=order.filled_at or now,
+            last_price=entry_price,
+            stop_loss_threshold_pct=0.02,
+            take_profit_threshold_pct=0.04,
         )
+        if order.broker == 'kis':
+            if order.owner_user_id != lifecycle.owner_user_id:
+                return
+            from app.services.kis_order_account_scope import active_position_rows
+            from app.services.kis_position_lifecycle_service import insert_kis_position_if_absent
+
+            if insert_kis_position_if_absent(db, lifecycle) is None:
+                active_position_rows(db, user.id, order.symbol).filter(
+                    PositionLifecycle.entry_order_id != order.id,
+                ).update(
+                    {PositionLifecycle.manual_review_required: True}, synchronize_session='fetch',
+                )
+        else:
+            db.add(lifecycle)
         db.commit()
 
     def _append_snapshot_risk_flags(

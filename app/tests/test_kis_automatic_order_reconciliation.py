@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 import json
+import sqlite3
 
 import pytest
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
@@ -13,7 +15,8 @@ from app.services.kis_automatic_order_reconciliation_service import (
     KisAutomaticOrderReconciliationService, MODE,
 )
 from app.services.kis_daily_entry_accounting import daily_entry_counts
-from app.services.kis_order_account_scope import position_management_block_reason
+from app.services.kis_order_account_scope import position_management_block_reason, position_sell_block_reason
+from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.tests.test_kis_duplicate_account_scope import accounts  # noqa: F401
 
 NOW = datetime(2026, 11, 16, 0, 30, tzinfo=UTC)
@@ -190,23 +193,133 @@ def test_legacy_admin_profile_owner_and_regular_profile_mismatch(db_session, acc
     assert row.internal_status == 'CANCELED'
 
 
-def test_concurrent_workers_use_database_lease_and_cas(db_session, accounts, fake_kis_admin_credentials):
+def test_concurrent_workers_use_database_lease_and_cas(db_session, accounts, fake_kis_admin_credentials, tmp_path):
     svc, client, _ = harness(db_session, accounts, fake_kis_admin_credentials, [], 'user')
     row = order(db_session, client.user_id)
-    sessions = sessionmaker(bind=db_session.get_bind())
-    def during_read():
-        with sessions() as other:
-            assert svc.reconcile_account(other, owner_user_id=client.user_id)['status'] == 'deferred'
-            changed = other.get(OrderLog, row.id)
-            changed.internal_status = 'FILLED'
-            changed.filled_qty = 2
-            other.commit()
-        return page([evidence()])
-    client.pages = [during_read]
-    svc.reconcile_account(db_session, owner_user_id=client.user_id)
-    db_session.refresh(row)
-    assert row.internal_status == 'FILLED' and row.filled_qty == 2
-    assert db_session.query(TradeRunLog).filter_by(mode=MODE).count() == 0
+    row_id = row.id
+    path = tmp_path / 'concurrent_orders.db'
+    with sqlite3.connect(path) as target:
+        db_session.connection().connection.driver_connection.backup(target)
+    engine = create_engine(f'sqlite:///{path.as_posix()}')
+    sessions = sessionmaker(bind=engine)
+    try:
+        def during_read():
+            with sessions() as other:
+                assert svc.reconcile_account(other, owner_user_id=client.user_id)['status'] == 'deferred'
+                changed = other.get(OrderLog, row_id)
+                changed.internal_status = 'FILLED'
+                changed.filled_qty = 2
+                other.commit()
+            return page([evidence()])
+
+        client.pages = [during_read]
+        with sessions() as db:
+            svc.reconcile_account(db, owner_user_id=client.user_id)
+            stored = db.get(OrderLog, row_id)
+            assert stored.internal_status == 'FILLED' and stored.filled_qty == 2
+            assert db.query(TradeRunLog).filter_by(mode=MODE).count() == 0
+            assert db.get(KisOrderReconciliationState, f'user:{client.user_id}').last_failure_reason == 'concurrent_order_change'
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize('stamp', [
+    '2026-11-09 01:00:00', '2026-11-09 01:00:00.000000', '2026-11-09 10:00:00+09:00',
+])
+def test_reconciliation_accepts_legacy_sqlite_utc_representations(
+    db_session, accounts, fake_kis_admin_credentials, stamp,
+):
+    svc, client, _ = harness(db_session, accounts, fake_kis_admin_credentials, [page([evidence()])], 'user')
+    row = order(db_session, client.user_id, submitted_at=None)
+    db_session.execute(text('update orders set created_at=:stamp where id=:id'), {'stamp': stamp, 'id': row.id})
+    db_session.commit()
+    assert svc.reconcile_account(db_session, owner_user_id=client.user_id)['finalized_count'] == 1
+    assert row.internal_status == 'CANCELED'
+
+
+@pytest.mark.parametrize('scenario', [
+    'verified', 'quantity', 'average_price', 'additional_buy', 'other_entry', 'open_sell', 'write_failure',
+])
+def test_order21_lifecycle_link_and_hold(db_session, accounts, fake_kis_admin_credentials, monkeypatch, scenario):
+    broker_fill = evidence(
+        odno='00021', ord_dt='20261118', ord_tmd='122246', pdno='036460', sll_buy_dvsn_cd='02',
+        ord_qty='6', tot_ccld_qty='6', rmn_qty='0', avg_prvs='38350', cncl_yn='N',
+    )
+    svc, client, clock = harness(db_session, accounts, fake_kis_admin_credentials, [page([broker_fill])])
+    clock[0] = datetime(2026, 11, 23, 4, tzinfo=UTC)
+    client.read_reconciliation_account_snapshot = lambda **_: (
+        [{'symbol': '036460', 'qty': 7 if scenario == 'quantity' else 6,
+          'avg_entry_price': 38400 if scenario == 'average_price' else 38350}],
+        [{'symbol': '036460', 'side': 'sell', 'unfilled_qty': 6}] if scenario == 'open_sell' else [],
+    )
+    row = order(
+        db_session, None, id=21, symbol='036460', side='buy', internal_status='SUBMITTED',
+        qty=6, requested_qty=6, remaining_qty=6, broker_order_id='21', kis_odno='21',
+        submitted_at=datetime(2026, 11, 18, 3, 22, 40),
+        request_payload='{"source":"strategy_live_auto_buy"}',
+    )
+    db_session.execute(text("update orders set created_at='2026-11-18 03:22:38' where id=21"))
+    observed = datetime(2026, 11, 18, 3, 22, 51, 691685)
+    original = PositionLifecycle(
+        id=5, symbol=row.symbol, owner_user_id=None, entry_order_id=19 if scenario == 'other_entry' else -1,
+        entry_source='order_log' if scenario == 'other_entry' else 'broker_position_snapshot',
+        entry_time_source='broker_position_first_observed_at_fallback', status='open', opened_at=observed,
+        quantity=6, entry_price=38350, cost_basis=230100, stop_loss_threshold_pct=2, take_profit_threshold_pct=4,
+    )
+    unrelated = PositionLifecycle(
+        id=9, owner_user_id=accounts[1].id, symbol=row.symbol, entry_order_id=-2, quantity=2,
+        status='open', entry_price=12345, cost_basis=24690, opened_at=observed,
+    )
+    blocked = order(db_session, 1, id=97, symbol=row.symbol, internal_status='REJECTED_BY_SAFETY_GATE',
+                    broker_order_id=None, kis_odno=None)
+    if scenario == 'additional_buy':
+        order(db_session, None, id=23, symbol=row.symbol, side='buy', internal_status='FILLED', filled_qty=1,
+              broker_order_id='23', kis_odno='23')
+    db_session.add_all([original, unrelated])
+    db_session.commit()
+    assert position_sell_block_reason(db_session, owner_user_id=None, symbol=row.symbol, broker_quantity=6) == (
+        'position_lifecycle_reconciliation_pending'
+    )
+
+    if scenario == 'write_failure':
+        reconcile = KisPositionLifecycleService.reconcile_existing_buy_position
+
+        def fail_after_link(*args):
+            reconcile(*args)
+            raise RuntimeError('simulated lifecycle transaction failure')
+
+        with monkeypatch.context() as mp:
+            mp.setattr(KisPositionLifecycleService, 'reconcile_existing_buy_position', fail_after_link)
+            assert svc.reconcile_account(db_session, trigger='startup_or_periodic')['finalized_count'] == 0
+        assert row.internal_status == 'SUBMITTED' and original.entry_order_id == -1
+        assert db_session.query(TradeRunLog).filter_by(mode=MODE).count() == 0
+        clock[0] += timedelta(minutes=10)
+
+    assert svc.reconcile_account(db_session, trigger='startup_or_periodic')['finalized_count'] == 1
+    assert (row.internal_status, row.filled_qty, row.remaining_qty) == ('FILLED', 6, 0)
+    assert original.id == 5 and original.status == 'open' and original.quantity == 6
+    assert original.entry_price == 38350 and original.stop_loss_threshold_pct == 2
+    assert original.opened_at == observed
+    if scenario in ('verified', 'write_failure'):
+        assert original.entry_order_id == 21 and original.entry_source == 'broker_position_snapshot'
+        assert original.manual_review_required is False
+        assert position_sell_block_reason(db_session, owner_user_id=None, symbol=row.symbol, broker_quantity=6) is None
+        assert position_sell_block_reason(db_session, owner_user_id=None, symbol=row.symbol, broker_quantity=5) == (
+            'position_lifecycle_quantity_mismatch'
+        )
+    else:
+        assert original.entry_order_id == (19 if scenario == 'other_entry' else -1)
+        assert original.manual_review_required is True
+        assert position_sell_block_reason(db_session, owner_user_id=None, symbol=row.symbol, broker_quantity=6) == (
+            'position_lifecycle_manual_review'
+        )
+    assert unrelated.quantity == 2 and unrelated.entry_order_id == -2 and not unrelated.manual_review_required
+    assert blocked.internal_status == 'REJECTED_BY_SAFETY_GATE'
+    KisPositionLifecycleService(client=client).sync_filled_buy(db_session, row)
+    clock[0] += timedelta(minutes=10)
+    svc.reconcile_account(db_session, trigger='startup_or_periodic')
+    assert db_session.query(PositionLifecycle).filter_by(owner_user_id=None, symbol=row.symbol, status='open').count() == 1
+    assert db_session.query(TradeRunLog).filter_by(mode=MODE).count() == 1
 
 
 def test_partial_fill_preserves_daily_cap_reservation_and_lifecycle(db_session, accounts, fake_kis_admin_credentials):
