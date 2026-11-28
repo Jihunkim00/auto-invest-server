@@ -470,7 +470,7 @@ class ProfileAwareDryRunAutoBuyService:
                         else None
                     ),
                     profile_snapshot_context=(
-                        profile_snapshot.get("snapshot")
+                        {**profile_snapshot.get("snapshot", {}), "_effective_schedule_profile": profile}
                         if profile_snapshot
                         else None
                     ),

@@ -1,0 +1,2 @@
+observed_at,run_key,observation_key,symbol,c_reversal_score,a_gpt_buy_score,a_final_score,gpt_v2_export_version,gpt_v2_status,gpt_v2_analysis_json,gpt_v2_outcome_json,gpt_v2_v1_performance_json
+2026-10-29T11:30:00+09:00,pr144_fixture,pr144_fixture:005930,005930,70.0,65.0,68.75,pr144-v1,pending,"{""gpt_v2_status"":""pending"",""gpt_buy_score_v2"":null}",,"{""v1_decision_ready_ms"":80}"

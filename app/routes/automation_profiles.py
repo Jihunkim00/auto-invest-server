@@ -24,6 +24,7 @@ from app.services.automation_profile_watchlist_service import AutomationProfileW
 from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
 from app.db.models import User
 from app.services.symbol_search_service import SymbolSearchService
+from app.services.kis_gpt_shadow_service import latest_shadow_results
 
 
 router = APIRouter(
@@ -95,6 +96,20 @@ def profile_watchlist_diagnostics(
         )
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
+
+@router.get('/{profile_id}/gpt-shadow')
+def profile_gpt_shadow(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
+):
+    try:
+        profile = _get_admin_profile(service, db, profile_id, user)
+        return latest_shadow_results(db, profile.id, profile.owner_user_id)
+    except AutomationProfileNotFound as exc:
+        raise _service_error(exc) from exc
+
 
 @router.get('/{profile_id}/capital-state')
 def profile_capital_state(

@@ -54,6 +54,11 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   final _maxOrderController = TextEditingController(text: '500000');
   final _stopLossController = TextEditingController(text: '2');
   final _takeProfitController = TextEditingController(text: '3');
+  final _gptShortController = TextEditingController(text: '30');
+  final _gptLongController = TextEditingController(text: '60');
+  final _gptEventController = TextEditingController(text: '7');
+  bool _gptShadowEnabled = true;
+  Future<Map<String, dynamic>>? _gptShadowResults;
   final _maxEntriesController = TextEditingController(text: '1');
   String _sizingMode = 'equity_pct';
   double _maxPositionPct = 12;
@@ -80,6 +85,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _maxOrderController,
       _stopLossController,
       _takeProfitController,
+      _gptShortController,
+      _gptLongController,
+      _gptEventController,
       _maxEntriesController,
     ]) {
       controller.dispose();
@@ -147,6 +155,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _capitalState = <String, dynamic>{};
       _watchlistDiagnostics = <String, dynamic>{};
       _compoundEnabled = false;
+      _setGptSettings(null);
+      _gptShadowResults = null;
       _nameController.text = '';
       _startController.text = _defaultStartDate;
       _endController.text = _defaultEndDate;
@@ -190,6 +200,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           '${profile.capital['max_order_notional_krw'] ?? 500000}';
       _stopLossController.text = '${profile.exit['stop_loss_pct'] ?? 2}';
       _takeProfitController.text = '${profile.exit['take_profit_pct'] ?? 3}';
+      _setGptSettings(profile);
+      _gptShadowResults = null;
       _maxEntriesController.text =
           '${profile.entry['max_new_entries_per_day'] ?? 1}';
       _sizingMode = profile.capital['sizing_mode'] == 'fixed_budget'
@@ -201,6 +213,14 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     });
     _loadCapitalState(profile);
     _loadWatchlistDiagnostics(profile);
+  }
+
+  void _setGptSettings(AutomationStrategyProfile? profile) {
+    final settings = profile?.gptAnalysis ?? const <String, dynamic>{};
+    _gptShadowEnabled = settings['gpt_v2_shadow_enabled'] != false;
+    _gptShortController.text = '${settings['gpt_short_horizon_minutes'] ?? 30}';
+    _gptLongController.text = '${settings['gpt_long_horizon_minutes'] ?? 60}';
+    _gptEventController.text = '${settings['gpt_event_lookahead_days'] ?? 7}';
   }
 
   Future<void> _addAnalysisTime() async {
@@ -300,6 +320,15 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       "${value.hour.toString().padLeft(2, "0")}:${value.minute.toString().padLeft(2, "0")}";
 
   String? _validateEditor() {
+    final short = int.tryParse(_gptShortController.text.trim());
+    final long = int.tryParse(_gptLongController.text.trim());
+    final days = int.tryParse(_gptEventController.text.trim());
+    if (short == null || long == null || short < 1 || long > 120 || short >= long) {
+      return 'GPT 단기·장기 분석 시간은 1~120분이며 단기가 장기보다 짧아야 합니다.';
+    }
+    if (days == null || days < 0 || days > 30) {
+      return '기업 이벤트 조회 기간은 0~30일이어야 합니다.';
+    }
     final dateError = _dateRangeError();
     if (dateError != null) return dateError;
     if (_analysisTimes.isEmpty) return "분석 시각은 최소 1개가 필요합니다.";
@@ -375,6 +404,12 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         'gate_level': 2,
       },
       'monitoring': {'interval_seconds': 60},
+      'gpt_analysis': {
+        'gpt_v2_shadow_enabled': _gptShadowEnabled,
+        'gpt_short_horizon_minutes': int.parse(_gptShortController.text.trim()),
+        'gpt_long_horizon_minutes': int.parse(_gptLongController.text.trim()),
+        'gpt_event_lookahead_days': int.parse(_gptEventController.text.trim()),
+      },
       'exit': {
         'stop_loss_enabled': true,
         'stop_loss_pct': double.tryParse(_stopLossController.text) ?? 2,
@@ -484,16 +519,36 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
             .where((profile) => profile.id == created.id)
             .toList();
         final selected = matches.isEmpty ? created : matches.first;
-        setState(() => _selected = selected);
+        setState(() {
+          _selected = selected;
+          _setGptSettings(selected);
+        });
         _loadCapitalState(selected);
       } else {
-        await _updateProfile(_selected!.id, body);
-        await _load(keepBusy: true);
+        final saved = await _updateProfile(_selected!.id, body);
+        final refreshed = await _load(keepBusy: true);
+        if (!mounted) return;
+        final selected = refreshed?.profiles.where((profile) => profile.id == saved.id).firstOrNull ?? saved;
+        setState(() {
+          _selected = selected;
+          _setGptSettings(selected);
+          _gptShadowResults = null;
+        });
       }
       await _notifyUserProfileChanged();
-      if (mounted) setState(() => _error = null);
+      if (mounted) {
+        setState(() => _error = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('일정 설정을 저장했습니다.')),
+        );
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        setState(() {
+          _setGptSettings(_selected);
+          _error = error.toString();
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1200,7 +1255,97 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               style: TextStyle(color: Colors.white54, height: 1.4),
             ),
           ),
+          _gptAnalysisSettings(),
         ],
+      ),
+    );
+  }
+
+  Widget _gptAnalysisSettings() {
+    final profile = _selected;
+    final exit = profile?.effectiveExit ?? const <String, dynamic>{};
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _FormSectionHeading(icon: Icons.analytics_outlined, title: 'GPT 분석 설정'),
+        const Text('운영 전략 V1 (Legacy) · V2 Shadow Only'),
+        if (profile != null)
+          Text('적용 손절 ${exit['stop_loss_pct'] ?? profile.exit['stop_loss_pct'] ?? 2}%'
+              ' · 적용 익절 ${exit['take_profit_pct'] ?? profile.exit['take_profit_pct'] ?? 3}%'),
+        SwitchListTile(
+          key: const ValueKey('gpt-v2-shadow'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('GPT V2 섀도 분석'),
+          value: _gptShadowEnabled,
+          onChanged: _busy ? null : (enabled) => setState(() => _gptShadowEnabled = enabled),
+        ),
+        _ProfileFieldRow(fields: [
+          _gptNumber('단기 (분)', 'gpt-horizon-short', _gptShortController),
+          _gptNumber('장기 (분)', 'gpt-horizon-long', _gptLongController),
+          _gptNumber('이벤트 (일)', 'gpt-event-days', _gptEventController),
+        ]),
+        if (profile != null)
+          ExpansionTile(
+            key: ValueKey('gpt-shadow-results-${profile.id}'),
+            tilePadding: EdgeInsets.zero,
+            title: const Text('최근 GPT 섀도 분석'),
+            onExpansionChanged: (opened) {
+              if (opened) {
+                setState(() => _gptShadowResults = widget.apiClient.fetchAutomationProfileGptShadow(
+                  profile.id, userScoped: widget.userScoped,
+                ));
+              }
+            },
+            children: [
+              FutureBuilder<Map<String, dynamic>>(
+                future: _gptShadowResults,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const LinearProgressIndicator();
+                  }
+                  if (snapshot.hasError) return const Text('섀도 분석을 불러오지 못했습니다.');
+                  final items = snapshot.data?['items'];
+                  if (items is! List || items.isEmpty) return const Text('저장된 섀도 분석이 없습니다.');
+                  return Column(children: [
+                    for (final row in items.whereType<Map>()) _gptResult(row),
+                  ]);
+                },
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _gptResult(Map<dynamic, dynamic> row) {
+    String value(String key) => row[key]?.toString() ?? '—';
+    String pct(String key) {
+      final amount = row[key];
+      return amount is num ? '${(amount * 100).toStringAsFixed(2)}%' : '—';
+    }
+    final events = row['corporate_events'];
+    final eventText = events is List && events.isNotEmpty
+        ? events.whereType<Map>().map((e) => '${e['event_type']} ${e['event_date'] ?? ''}').join(', ')
+        : (row['corporate_context'] as Map?)?['catalyst']?.toString() ?? '—';
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text('${value('symbol')} · ${value('gpt_v2_status')}'),
+      subtitle: Text(
+        'V1 ${value('legacy_gpt_buy_score')} · V2 단기 ${value('gpt_buy_score_short')}'
+        ' · 장기 ${value('gpt_buy_score_long')} · 종합 ${value('gpt_buy_score_v2')}\n'
+        '손절 안전 ${value('stop_loss_safety_score')} · 손절 ${pct('effective_stop_loss_pct')}'
+        ' · 익절 ${pct('effective_take_profit_pct')}\n'
+        '$eventText · 데이터 ${value('data_quality')} · ${value('duration_ms')} ms',
+      ),
+    );
+  }
+
+  Widget _gptNumber(String label, String key, TextEditingController controller) {
+    return _LabeledField(
+      label: label,
+      field: TextField(
+        key: ValueKey(key), controller: controller, enabled: !_busy,
+        keyboardType: TextInputType.number, decoration: const InputDecoration(),
       ),
     );
   }

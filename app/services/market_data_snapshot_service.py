@@ -89,6 +89,7 @@ class MarketDataSnapshotService:
             'daily_cache_miss': bool(daily_metadata.get('daily_cache_miss')),
             'daily_cache_key': daily_metadata.get('daily_cache_key'),
             'daily_bars_source': daily_metadata.get('source', 'kis'),
+            'daily_price_basis': getattr(type(self.client), "domestic_daily_price_basis", None),
         }
 
     def get_daily_bars(

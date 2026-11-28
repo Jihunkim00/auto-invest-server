@@ -10,6 +10,8 @@ import 'package:auto_invest_dashboard/features/automation_profile/automation_pro
 
 class _ProfileClient extends http.BaseClient {
   final List<Map<String, dynamic>> writes = <Map<String, dynamic>>[];
+  bool failGptSave = false;
+  bool persistGptEdits = false;
   final Map<String, dynamic> profile = {
     'id': 1,
     'profile_key': 'demo',
@@ -45,6 +47,18 @@ class _ProfileClient extends http.BaseClient {
       writes.add(Map<String, dynamic>.from(jsonDecode(request.body) as Map));
     }
     dynamic body;
+    if (persistGptEdits &&
+        request.method == 'PUT' &&
+        request.url.path == '/strategy-profiles/1') {
+      if (failGptSave) {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('{"detail":"validation_failed"}')),
+          422,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      (profile['settings'] as Map)['gpt_analysis'] = writes.last['gpt_analysis'];
+    }
     if (request.url.path == '/strategy-profiles') {
       body = request.method == 'GET'
           ? {
@@ -78,6 +92,53 @@ class _ProfileClient extends http.BaseClient {
 }
 
 void main() {
+  testWidgets('GPT shadow settings validate, save, refresh and roll back',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final client = _ProfileClient()..persistGptEdits = true;
+    await tester.pumpWidget(MaterialApp(
+      home: AutomationProfileScreen(apiClient: ApiClient(client: client)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('automation-profile-1')));
+    await tester.pumpAndSettle();
+    final short = find.byKey(const ValueKey('gpt-horizon-short'));
+    final long = find.byKey(const ValueKey('gpt-horizon-long'));
+    final save = find.byKey(const ValueKey('automation-profile-save'));
+    final toggle = find.byKey(const ValueKey('gpt-v2-shadow'));
+    await tester.ensureVisible(short);
+    await tester.enterText(short, '61');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(client.writes, isEmpty);
+    await tester.ensureVisible(short);
+    await tester.enterText(short, '20');
+    await tester.enterText(long, '50');
+    await tester.tap(toggle);
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(client.writes.single['gpt_analysis'], {
+      'gpt_v2_shadow_enabled': false,
+      'gpt_short_horizon_minutes': 20,
+      'gpt_long_horizon_minutes': 50,
+      'gpt_event_lookahead_days': 7,
+    });
+    expect(tester.widget<TextField>(short).controller!.text, '20');
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    client.failGptSave = true;
+    await tester.ensureVisible(short);
+    await tester.enterText(short, '21');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(client.writes, hasLength(2));
+    expect(tester.widget<TextField>(short).controller!.text, '20');
+  });
+
   testWidgets('fixed budget profile loads with mode-aware controls',
       (tester) async {
     tester.view.physicalSize = const Size(800, 1400);

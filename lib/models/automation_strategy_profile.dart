@@ -26,6 +26,8 @@ class AutomationStrategyProfile {
   Map<String, dynamic> get universe => _map(settings['universe']);
   Map<String, dynamic> get entry => _map(settings['entry']);
   Map<String, dynamic> get monitoring => _map(settings['monitoring']);
+  Map<String, dynamic> get gptAnalysis => _map(settings['gpt_analysis']);
+  Map<String, dynamic> get effectiveExit => _map(_map(raw['effective_settings'])['exit']);
   Map<String, dynamic> get exit => _map(settings['exit']);
   Map<String, dynamic> get operation => _map(settings['operation']);
   int get maxOpenPositions => _int(settings['max_open_positions'], 1);

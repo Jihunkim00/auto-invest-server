@@ -2129,6 +2129,22 @@ class AutomationSchedulerService(SchedulerService):
                 'automation_profile_watchlist_snapshot': profile_watchlist.get('snapshot'),
             }
             self._record_automation_watchlist_status(result)
+            if runtime.get("quant_selection_mode") == "A_TOP5_C_GPT" and (
+                (profile.get("gpt_analysis") or {}).get("gpt_v2_shadow_enabled", True)
+            ):
+                try:
+                    from app.services.kis_gpt_shadow_service import shadow_worker
+                    worker = shadow_worker()
+                    if worker is not None:
+                        analysis_date = (context or {}).get("analysis_date")
+                        if not isinstance(analysis_date, date):
+                            analysis_date = now_kst.date()
+                        worker.prefetch_dividends(
+                            [item["symbol"] for item in profile_watchlist.get("items", []) if item.get("symbol")],
+                            analysis_date, db.get_bind(),
+                        )
+                except Exception:
+                    logger.exception("Could not enqueue shadow dividend prefetch")
             return result
         except Exception as exc:
             return self._automation_watchlist_failure(

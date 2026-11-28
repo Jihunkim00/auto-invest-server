@@ -86,6 +86,8 @@ app.add_middleware(
 def on_startup():
     configure_runtime_logging(settings)
     init_db()
+    from app.services.kis_gpt_shadow_service import start_shadow_worker
+    start_shadow_worker(settings)
     scheduler_service.start()
     log_startup_state(settings, scheduler_service)
 
@@ -93,6 +95,8 @@ def on_startup():
 @app.on_event("shutdown")
 def on_shutdown():
     scheduler_service.stop()
+    from app.services.kis_gpt_shadow_service import stop_shadow_worker
+    stop_shadow_worker()
 
 
 app.include_router(health_router)

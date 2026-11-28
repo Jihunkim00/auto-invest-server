@@ -19,6 +19,10 @@ from app.db.models import QuantABObservation, QuantABOutcome
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.market_data_snapshot_service import MarketDataSnapshotService
 from app.services.market_session_service import MarketSessionService
+from app.config import get_settings
+from app.db.models import KisGptShadowObservation
+from app.services.kis_gpt_shadow_outcomes import outcome_checkpoints
+from app.services.kis_stop_loss_aware_feature_service import timestamp as shadow_timestamp
 
 KST = ZoneInfo("Asia/Seoul")
 TAKE_PROFIT_PCT = 5.0
@@ -121,6 +125,7 @@ class QuantABOutcomeLabelService:
                 self._stats["outcomes_invalid"] += 1
         if labeled:
             db.commit()
+        v2_labeled = self._label_shadow_outcomes(db, now_kst, safe_limit)
         self._stats["elapsed_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
         return {
             "status": "ok",
@@ -128,9 +133,53 @@ class QuantABOutcomeLabelService:
             "now": now_kst.isoformat(),
             "items": labeled,
             "count": len(labeled),
+            "gpt_shadow_outcomes_labeled": v2_labeled,
             "performance": dict(self._stats),
             "safety": _safety(),
         }
+
+    def _label_shadow_outcomes(self, db, now, limit):
+        count = 0
+        shadow = KisGptShadowObservation
+        expired = db.query(shadow).filter(
+            shadow.status == "pending", shadow.decision_at < now - timedelta(minutes=15),
+        ).order_by(shadow.decision_at).limit(limit).all()
+        for row in expired:
+            try:
+                analysis = json.loads(row.analysis_json)
+                analysis.update(gpt_v2_status="failed", failure_reason="shadow_worker_interrupted")
+                row.status = "failed"
+                row.analysis_json = json.dumps(analysis, ensure_ascii=False)
+            except (TypeError, ValueError):
+                continue
+        if expired:
+            db.commit()
+        rows = db.query(shadow).filter(
+            shadow.outcome_json.is_(None), shadow.status != "pending", shadow.decision_at <= now,
+        ).order_by(shadow.decision_at, shadow.observation_key).limit(limit).all()
+        for row in rows:
+            try:
+                analysis = json.loads(row.analysis_json)
+                decision = shadow_timestamp(analysis["decision_timestamp"])
+                schedule = analysis["effective_schedule_snapshot"]
+                close = shadow_timestamp(schedule.get("session_close"))
+                maturities = [decision + timedelta(minutes=schedule[f"gpt_{period}_horizon_minutes"])
+                              for period in ("short", "long")]
+                in_session = [at for at in maturities if close and at <= close]
+                if in_session and max(in_session) > now:
+                    continue
+                bars = []
+                if in_session and analysis.get("estimated_entry_price") is not None:
+                    bars, _ = self._get_day_bars(row.symbol, decision.date(), end=max(in_session), as_of=now)
+                values = outcome_checkpoints(analysis, decision, now, bars, get_settings().kis_gpt_shadow_cost_bps)
+                row.outcome_json = json.dumps(values, ensure_ascii=False)
+                count += 1
+            except Exception:
+                # Leave this label retryable if market data or settings cannot be read.
+                continue
+        if count:
+            db.commit()
+        return count
 
     # Compatibility-friendly aliases for callers that use the shorter names.
     def label_pending_mature(self, db, **kwargs) -> dict[str, Any]:

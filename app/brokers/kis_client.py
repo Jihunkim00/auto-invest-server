@@ -75,6 +75,8 @@ class KisClient:
     enforce the manual safety gates before invoking it.
     """
 
+    domestic_daily_price_basis = "kis_adjusted"
+
     def __init__(self, settings=None, auth_manager: KisAuthManager | None = None):
         self.settings = settings or get_settings()
         self.auth_manager = auth_manager or KisAuthManager(self.settings)
@@ -1072,22 +1074,24 @@ class KisClient:
                 access_token=access_token,
             )
             try:
-                if method == "GET":
-                    response = requests.get(
-                        url,
-                        params=params or {},
-                        headers=headers,
-                        timeout=10,
-                    )
-                elif method == "POST":
-                    response = requests.post(
-                        url,
-                        data=json.dumps(payload or {}),
-                        headers=headers,
-                        timeout=10,
-                    )
-                else:
-                    raise ValueError(f"Unsupported KIS request method: {method}")
+                from app.services.kis_gpt_shadow_market_data import production_kis_request
+                with production_kis_request():
+                    if method == "GET":
+                        response = requests.get(
+                            url,
+                            params=params or {},
+                            headers=headers,
+                            timeout=10,
+                        )
+                    elif method == "POST":
+                        response = requests.post(
+                            url,
+                            data=json.dumps(payload or {}),
+                            headers=headers,
+                            timeout=10,
+                        )
+                    else:
+                        raise ValueError(f"Unsupported KIS request method: {method}")
             except requests.RequestException as exc:
                 details = {**context, "error_type": type(exc).__name__}
                 raise KisApiError(

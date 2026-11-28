@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     kis_read_only_rate_limit_retry_seconds: float = 1.2
     kis_account_state_cache_ttl_seconds: float = 2.0
     kis_daily_bars_cache_ttl_seconds: float = 86400.0
+    kis_gpt_shadow_workers: int = 2
+    kis_gpt_shadow_queue_size: int = 2
+    kis_gpt_shadow_deadline_seconds: float = 25.0
+    kis_gpt_shadow_openai_concurrency: int = 1
+    kis_gpt_shadow_kis_concurrency: int = 1
+    kis_gpt_shadow_calendar_ttl_seconds: int = 21600
+    kis_gpt_shadow_master_dir: str | None = None
+    kis_gpt_shadow_cost_bps: float = 0.0
     kis_account_state_max_stale_seconds: float = 5.0
     # Read-only account reads may retry three times: 5 seconds, then 15
     # seconds. Order submission paths never use this retry policy.

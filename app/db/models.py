@@ -1392,6 +1392,20 @@ class QuantABObservation(Base):
     outcome_status = Column(String(30), nullable=False, default='pending', index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+class KisGptShadowObservation(Base):
+    __tablename__ = 'kis_gpt_shadow_observations'
+
+    observation_key = Column(String(180), primary_key=True)
+    run_key = Column(String(64), nullable=False, index=True)
+    profile_id = Column(Integer, nullable=False, index=True)
+    owner_user_id = Column(Integer, nullable=True, index=True)
+    symbol = Column(String(20), nullable=False)
+    decision_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(30), nullable=False)
+    analysis_json = Column(Text, nullable=False)
+    outcome_json = Column(Text, nullable=True)
+
+
 class QuantABOutcome(Base):
     """Mutable, independently labelable outcome for one observation."""
 

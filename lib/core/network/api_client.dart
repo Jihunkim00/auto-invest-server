@@ -851,6 +851,12 @@ class ApiClient {
         '/strategy-profiles/$profileId/watchlist-diagnostics');
   }
 
+  Future<Map<String, dynamic>> fetchAutomationProfileGptShadow(
+      int profileId, {required bool userScoped}) {
+    final prefix = userScoped ? '/users/me/automation-profiles' : '/strategy-profiles';
+    return _getJsonNoCache('$prefix/$profileId/gpt-shadow');
+  }
+
   Future<Map<String, dynamic>> fetchUserAutomationProfileWatchlistDiagnostics(
       int profileId) {
     return _getJsonNoCache(

@@ -1,0 +1,16 @@
+[
+  {
+    "observed_at": "2026-10-29T11:30:00+09:00",
+    "run_key": "pr144_fixture",
+    "observation_key": "pr144_fixture:005930",
+    "symbol": "005930",
+    "c_reversal_score": 70.0,
+    "a_gpt_buy_score": 65.0,
+    "a_final_score": 68.75,
+    "gpt_v2_export_version": "pr144-v1",
+    "gpt_v2_status": "pending",
+    "gpt_v2_analysis_json": "{\"gpt_v2_status\":\"pending\",\"gpt_buy_score_v2\":null}",
+    "gpt_v2_outcome_json": null,
+    "gpt_v2_v1_performance_json": "{\"v1_decision_ready_ms\":80}"
+  }
+]

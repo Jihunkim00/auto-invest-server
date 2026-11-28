@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.scheduler_task_supervisor import check_scheduler_task_active
 
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -54,6 +55,8 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.profile_universe_service import profile_price_exclusion_reason
 from app.services.quant_signal_service import QuantSignalService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.kis_gpt_shadow_service import ShadowSnapshot, production_gpt_request, schedule_snapshot, shadow_worker
+from app.services.kis_stop_loss_aware_feature_service import timestamp as shadow_timestamp
 from app.services.technical_indicator_service import (
     EMPTY_TECHNICAL_INDICATORS,
     TechnicalIndicatorService,
@@ -61,6 +64,7 @@ from app.services.technical_indicator_service import (
 )
 
 KR_PREVIEW_LIMIT = 50
+logger = logging.getLogger(__name__)
 KR_PREVIEW_TOP_GPT_CANDIDATES = 5
 KR_DISABLED_REASONS = ["preview_only", "kr_trading_disabled"]
 EMPTY_INDICATORS = dict(EMPTY_TECHNICAL_INDICATORS)
@@ -213,6 +217,25 @@ class KisWatchlistPreviewService:
         )
         runtime_input_symbols = _candidate_symbols(configured_symbols)
         runtime_settings = self._runtime_settings(db)
+        selection_mode = str(runtime_settings.get("quant_selection_mode") or "A_ONLY").strip().upper()
+        active_c_mode = selection_mode == "A_TOP5_C_GPT"
+        profile_snapshot_context = dict(profile_snapshot_context or {})
+        schedule_profile = profile_snapshot_context.pop("_effective_schedule_profile", None)
+        worker = shadow_worker() if include_gpt and active_c_mode and db is not None else None
+        v2_schedule = None
+        if worker is not None:
+            try:
+                if schedule_profile is None and trigger_source == "manual_kis_preview":
+                    from app.services.automation_profile_service import AutomationProfileService
+                    schedule_profile = AutomationProfileService().get_active_profile(db, now=decision_timestamp)
+                if schedule_profile and schedule_profile.get("id") and schedule_profile.get("status") == "active":
+                    v2_schedule = schedule_snapshot(
+                        schedule_profile, decision_timestamp, profile_snapshot_context.get("scheduler_slot"),
+                        self.session_service.get_session_status("KR", now=decision_timestamp),
+                        user_scheduled=(account_positions is not None and schedule_profile.get("owner_user_id") is not None),
+                    )
+            except Exception:
+                logger.exception("Could not snapshot effective Schedule for KIS GPT shadow")
         max_open_positions = max(1, _safe_int(runtime_settings.get("max_open_positions"), 3))
         per_slot_new_entry_limit = max(
             0,
@@ -347,6 +370,33 @@ class KisWatchlistPreviewService:
             intraday_snapshots_by_symbol=intraday_snapshots_by_symbol,
         )
         b_shadow_scan_finished = time.perf_counter()
+        runtime_a_top5 = quant_ranked_candidates[:5]
+        shadow_run_key = None
+        v2_status = None
+        if v2_schedule and v2_schedule["gpt_v2_shadow_enabled"] and quant_ranked_candidates:
+            shadow_run_key = f"kis_ab_v2_{uuid.uuid4().hex}"
+            try:
+                shared = self._gpt_shadow_snapshot(
+                    shadow_run_key, v2_schedule, runtime_a_top5, market_snapshots,
+                    intraday_snapshots_by_symbol, market_context_summary, market_regime_diagnostics(market_regime_context),
+                    decision_timestamp, preview_started, a_quant_scan_finished,
+                )
+                v2_status = "pending" if worker.submit(shared, db.get_bind()) else "skipped_capacity"
+            except Exception:
+                v2_status = "failed"
+                logger.exception("Could not enqueue KIS GPT shadow observations")
+
+        def disclosures_for(symbol):
+            disclosures = self.market_context_service.get_disclosures(
+                symbol, as_of=market_context.get("as_of"), limit=5,
+            )
+            if v2_status == "pending":
+                try:
+                    worker.publish_disclosures(shadow_run_key, symbol, disclosures)
+                except Exception:
+                    logger.exception("Could not share KIS disclosure context with the shadow worker")
+            return disclosures
+
         shadow_c_result = self._run_shadow_c(
             quant_ranked_candidates=quant_ranked_candidates,
             market_snapshots=market_snapshots,
@@ -355,8 +405,6 @@ class KisWatchlistPreviewService:
             decision_timestamp=decision_timestamp,
         )
         c_shadow_scan_finished = time.perf_counter()
-        selection_mode = str(runtime_settings.get("quant_selection_mode") or "A_ONLY").strip().upper()
-        active_c_mode = selection_mode == "A_TOP5_C_GPT"
         if active_c_mode:
             active_c_candidates = []
             for a_rank, item in enumerate(runtime_quant_ranked_candidates[:5], start=1):
@@ -423,11 +471,7 @@ class KisWatchlistPreviewService:
                     db=db,
                     market_context=market_context,
                     market_data_snapshot=market_snapshots.get(symbol),
-                    disclosure_context=self.market_context_service.get_disclosures(
-                        symbol,
-                        as_of=market_context.get("as_of"),
-                        limit=5,
-                    ),
+                    disclosure_context=disclosures_for(symbol),
                 )
                 item["snapshot_rank"] = (
                     raw.get("snapshot_rank")
@@ -530,11 +574,7 @@ class KisWatchlistPreviewService:
                     db=db,
                     market_context=market_context,
                     market_data_snapshot=market_snapshots.get(symbol),
-                    disclosure_context=self.market_context_service.get_disclosures(
-                        symbol,
-                        as_of=market_context.get("as_of"),
-                        limit=5,
-                    ),
+                    disclosure_context=disclosures_for(symbol),
                 )
                 if market_snapshots.get(symbol) is not None:
                     gpt_reuse_count += 1
@@ -843,6 +883,14 @@ class KisWatchlistPreviewService:
             }
             for rank, item in enumerate(quant_ranked_candidates, start=1)
         ]
+        if v2_schedule is not None:
+            performance.update(
+                parallel_execution_enabled=v2_status == "pending",
+                c_v1_ms=performance["c_shadow_scan_ms"],
+                gpt_v1_ms=performance["gpt_total_ms"],
+                v1_decision_ready_ms=round((time.perf_counter() - preview_started) * 1000, 2),
+                shadow_capacity_skip_count=int(v2_status == "skipped_capacity"),
+            )
         quant_experiment = {
             "selection_mode": str(runtime_settings.get("quant_selection_mode") or "A_ONLY"),
             "authoritative_variant": "A",
@@ -1005,6 +1053,13 @@ class KisWatchlistPreviewService:
             "count": len(items),
         }
         payload.update(market_regime_diagnostics(market_regime_context))
+        if shadow_run_key:
+            payload["gpt_shadow"] = {
+                "run_key": shadow_run_key, "status": v2_status, "shadow_only": True,
+                "effective_schedule_snapshot": v2_schedule,
+                "a_top_symbols": [item["symbol"] for item in runtime_a_top5],
+                "v2_completion_is_independent": True,
+            }
         if record_run and db is not None:
             run = _record_preview_run(
                 db,
@@ -1025,6 +1080,40 @@ class KisWatchlistPreviewService:
         from app.services.automation_run_diagnostics import record_preview
         record_preview(payload)
         return payload
+
+    @staticmethod
+    def _gpt_shadow_snapshot(run_key, schedule, candidates, quotes, intraday, market_context,
+                             market_regime, decision, started, a_finished):
+        frozen_candidates = []
+        for rank, item in enumerate(candidates, 1):
+            symbol = item["symbol"]
+            quote_snapshot = quotes.get(symbol, {})
+            quote = quote_snapshot.get("quote") or {}
+            captured_at = shadow_timestamp(quote_snapshot.get("captured_at"))
+            raw_quote_time = quote.get("timestamp")
+            quote_time = shadow_timestamp(raw_quote_time) if len(str(raw_quote_time)) > 10 else None
+            # Time-only quotes have no verified session date.
+            point_in_time = bool(captured_at and quote_time and
+                                 quote_time.date() == decision.date() and quote_time <= decision)
+            frozen_candidates.append({
+                "symbol": symbol, "name": item.get("name"), "a_rank": rank, "a_score": item.get("quant_buy_score"),
+                "price": item.get("current_price"), "proposed_entry_price": item.get("entry_price"),
+                "captured_at": quote_snapshot.get("captured_at"), "point_in_time_quote": point_in_time,
+                "known_daily_adjusted": bool(captured_at and captured_at.date() == decision.date()
+                                             and quote_snapshot.get("daily_price_basis") == "kis_adjusted"),
+                "bid": quote.get("bid") if point_in_time else None,
+                "ask": quote.get("ask") if point_in_time else None,
+                "daily": quote_snapshot.get("daily_bars") or [],
+                "minute": intraday.get(symbol, {}).get("bars") or [],
+            })
+        frozen_at = time.perf_counter()
+        content = json.dumps({
+            "schedule": schedule, "candidates": frozen_candidates, "market_context": market_context,
+            "market_regime": market_regime,
+            "performance": {"shared_snapshot_ms": round((frozen_at - started) * 1000, 2),
+                            "a_quant_scan_ms": round((a_finished - started) * 1000, 2)},
+        }, ensure_ascii=False, default=str)
+        return ShadowSnapshot(run_key, decision, started, frozen_at, content)
 
     def _run_shadow_b(
         self,
@@ -1922,7 +2011,7 @@ def _record_preview_run(
     )
     market_regime_context = market_regime_context or _observation_market_regime_context(db, payload)
     payload.update(market_regime_diagnostics(market_regime_context))
-    run_key = f"kis_preview_{uuid.uuid4().hex[:12]}"
+    run_key = (payload.get("gpt_shadow") or {}).get("run_key") or f"kis_preview_{uuid.uuid4().hex[:12]}"
     response_payload = _preview_log_payload(payload, gate_level=gate_level, trigger_source=trigger_source)
     run = TradeRunLog(
         run_key=run_key,
@@ -2053,7 +2142,8 @@ def _record_quant_ab_observations(
     experiment = payload.get("quant_experiment") or {}
     if not (bool(experiment.get("shadow_b_enabled")) or bool(experiment.get("shadow_c_enabled"))):
         return 0
-    observation_run_key = run_key or f"kis_ab_{uuid.uuid4().hex[:20]}"
+    shadow = payload.get("gpt_shadow") or {}
+    observation_run_key = run_key or shadow.get("run_key") or f"kis_ab_{uuid.uuid4().hex[:20]}"
     experiment_cohort_key = str(
         experiment.get('experiment_cohort_key')
         or experiment.get('cohort_key')
@@ -2177,8 +2267,16 @@ def _record_quant_ab_observations(
                 default=str,
             ),
             intraday_snapshot_metadata_json=json.dumps(
-                shadow.get("intraday_snapshot_metadata")
-                or c_shadow.get("intraday_snapshot_metadata") or {},
+                {
+                    **(shadow.get("intraday_snapshot_metadata")
+                       or c_shadow.get("intraday_snapshot_metadata") or {}),
+                    **({
+                        "gpt_shadow": payload["gpt_shadow"],
+                        "gpt_shadow_legacy_c_status": c_shadow.get("c_status"),
+                    } if symbol in (payload.get("gpt_shadow") or {}).get("a_top_symbols", []) else {}),
+                    **({"gpt_shadow_v1_performance": payload["performance"]}
+                       if "v1_decision_ready_ms" in (payload.get("performance") or {}) else {}),
+                },
                 ensure_ascii=False,
                 default=str,
             ),
@@ -2672,12 +2770,13 @@ class KisPreviewGptAdvisor:
             ensure_ascii=False,
         )
 
-        response = self.client.responses.create(
-            model=self.settings.openai_model,
-            reasoning={"effort": self.settings.openai_reasoning_effort},
-            instructions=system_prompt,
-            input=user_prompt,
-        )
+        with production_gpt_request():
+            response = self.client.responses.create(
+                model=self.settings.openai_model,
+                reasoning={"effort": self.settings.openai_reasoning_effort},
+                instructions=system_prompt,
+                input=user_prompt,
+            )
         raw_text = (response.output_text or "").strip()
         if not raw_text:
             raise ValueError("OpenAI returned empty output_text.")

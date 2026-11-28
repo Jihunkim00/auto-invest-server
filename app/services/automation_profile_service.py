@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pydantic import ValidationError
+
+from app.schemas.kis_gpt_shadow import KisGptAnalysisSettings
+
 import copy
 import hashlib
 import json
@@ -814,6 +818,7 @@ class AutomationProfileService:
             'universe': settings['universe'],
             'entry': settings['entry'],
             'monitoring': settings['monitoring'],
+            'gpt_analysis': settings['gpt_analysis'],
             'exit': settings['exit'],
             'operation': settings['operation'],
             'max_open_positions': int(settings['max_open_positions']),
@@ -844,6 +849,14 @@ class AutomationProfileService:
         monitoring = settings['monitoring']
         exit_settings = settings['exit']
         operation = settings['operation']
+        try:
+            KisGptAnalysisSettings.model_validate(settings.get('gpt_analysis', {}))
+        except ValidationError as exc:
+            errors.extend(
+                {'field': '.'.join(('gpt_analysis', *map(str, error['loc']))),
+                 'message': error['msg']}
+                for error in exc.errors()
+            )
         if capital['sizing_mode'] not in {'equity_pct', 'fixed_budget'}:
             errors.append({'field': 'capital.sizing_mode', 'message': 'must be equity_pct or fixed_budget'})
         if (
@@ -945,7 +958,7 @@ class AutomationProfileService:
         if provider not in ALLOWED_PROVIDERS or market not in ALLOWED_MARKETS:
             raise AutomationProfileValidationError([{'field': 'provider/market', 'message': 'unsupported provider or market'}])
         settings = copy.deepcopy(base.get('settings') or DEFAULT_PROFILE_SETTINGS)
-        for section in ('capital', 'universe', 'entry', 'monitoring', 'exit', 'operation'):
+        for section in ('capital', 'universe', 'entry', 'monitoring', 'exit', 'operation', 'gpt_analysis'):
             if section in payload and isinstance(payload[section], dict):
                 settings[section] = _deep_merge(settings.get(section, {}), payload[section])
         if isinstance(payload.get('settings'), dict):
@@ -963,6 +976,9 @@ class AutomationProfileService:
 
     def _normalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         merged = _deep_merge(copy.deepcopy(DEFAULT_PROFILE_SETTINGS), settings)
+        merged['gpt_analysis'] = _deep_merge(
+            KisGptAnalysisSettings().model_dump(), merged.get('gpt_analysis', {})
+        ) if isinstance(merged.get('gpt_analysis', {}), dict) else merged['gpt_analysis']
         merged['entry']['analysis_times'] = [
             str(value).strip() for value in merged['entry']['analysis_times']
         ]

@@ -17,8 +17,10 @@ import json
 import math
 import sqlite3
 import sys
+from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from statistics import fmean, median
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -194,13 +196,24 @@ def read_rows(connection, args) -> tuple[list[str], list[dict[str, Any]]]:
                 name = "outcome_" + name
             columns.append(column.label(name))
             outcome_names.append(name)
+    include_v2 = "kis_gpt_shadow_observations" in tables
+    v2_columns = ("gpt_v2_export_version", "gpt_v2_status", "gpt_v2_analysis_json",
+                  "gpt_v2_outcome_json", "gpt_v2_v1_performance_json") if include_v2 else ()
+    if include_v2:
+        shadow = Table("kis_gpt_shadow_observations", metadata, autoload_with=connection)
+        source = source.outerjoin(shadow, shadow.c.observation_key == observation.c.observation_key)
+        columns.extend((
+            shadow.c.status.label("gpt_v2_status"),
+            shadow.c.analysis_json.label("gpt_v2_analysis_json"),
+            shadow.c.outcome_json.label("gpt_v2_outcome_json"),
+        ))
     query = select(*columns).select_from(source).order_by(observation.c.observed_at, observation.c.id)
     if args.trigger_source:
         query = query.where(observation.c.trigger_source == args.trigger_source)
     # SQLite ALTER TABLE appends columns; CSV order must not depend on migration history.
     known_columns = (*FRONT_COLUMNS, *DETAIL_COLUMNS)
     extra_columns = sorted(set(observation.c.keys()) - set(known_columns))
-    fieldnames = list(dict.fromkeys((*known_columns, *extra_columns, *sorted(outcome_names))))
+    fieldnames = list(dict.fromkeys((*known_columns, *extra_columns, *sorted(outcome_names), *v2_columns)))
     rows = []
     for record in connection.execute(query).mappings():
         row = dict(record)
@@ -224,8 +237,144 @@ def read_rows(connection, args) -> tuple[list[str], list[dict[str, Any]]]:
             continue
         if args.passed_only and not row["entry_funnel_pass"]:
             continue
+        if include_v2:
+            metadata_payload = _json_object(row.get("intraday_snapshot_metadata_json"))
+            v2_manifest = metadata_payload.get("gpt_shadow") or {}
+            if row.get("gpt_v2_status") is None and v2_manifest:
+                status = v2_manifest.get("status")
+                row["gpt_v2_status"] = status
+                row["gpt_v2_analysis_json"] = json.dumps({
+                    "snapshot_id": v2_manifest.get("run_key"),
+                    "gpt_v2_status": status,
+                    "effective_schedule_snapshot": v2_manifest.get("effective_schedule_snapshot"),
+                }, ensure_ascii=False)
+            if row.get("gpt_v2_status") is not None:
+                row["gpt_v2_export_version"] = "pr144-v1"
+            performance = metadata_payload.get("gpt_shadow_v1_performance")
+            if performance:
+                row["gpt_v2_v1_performance_json"] = json.dumps(performance)
         rows.append({name: _json_value(row.get(name)) for name in fieldnames})
     return fieldnames, rows
+
+
+def _average(rows, key):
+    values = [value for row in rows if (value := _finite(row.get(key))) is not None]
+    return {"n": len(values), "mean": fmean(values) if values else None}
+
+
+def _rate(rows, key, expected):
+    values = [row[key] for row in rows if row.get(key) is not None]
+    return {"n": len(values), "rate": sum(value == expected for value in values) / len(values) if values else None}
+
+
+def _outcome_metrics(rows, period):
+    complete = [item for row in rows if (item := row["outcome"].get(period) or {}).get("status") == "complete"]
+    return {
+        "candidates": len(rows), "complete_paths": len(complete),
+        "stop_survival": _rate(complete, "stop_loss_survived", True),
+        "tp_first": _rate(complete, "first_intrabar_barrier", "tp_first"),
+        "sl_first": _rate(complete, "first_intrabar_barrier", "sl_first"),
+        "sl_first_sensitivity": _rate(complete, "sl_first_sensitivity", "sl_first"),
+        "same_bar_ambiguity": _rate(complete, "first_intrabar_barrier", "ambiguous_same_bar"),
+        "recovery_after_sl": _rate(complete, "recovered_above_entry_after_sl", True),
+        "mfe": _average(complete, "mfe"), "mae": _average(complete, "mae"),
+        "horizon_return": _average(complete, "horizon_return"),
+        "conservative_intrabar_net_expectancy": _average(complete, "conservative_intrabar_net_return"),
+        "monitor_exit_only_net_expectancy": _average(complete, "simulated_monitor_net_return"),
+    }
+
+
+def _latency(values):
+    values = sorted(values)
+    return {"n": len(values), "p50_ms": median(values) if values else None,
+            "p95_ms": values[math.ceil(len(values) * .95) - 1] if values else None}
+
+
+def v2_comparisons(rows, evaluation_from):
+    """Predeclared gates on an explicitly designated chronological holdout."""
+    entries = []
+    run_v1 = {}
+    for row in rows:
+        observed = _observed_date(row)
+        if not observed or observed < evaluation_from:
+            continue
+        timing = _json_object(row.get("gpt_v2_v1_performance_json"))
+        if timing:
+            run_v1[row["run_key"]] = timing
+        analysis = _json_object(row.get("gpt_v2_analysis_json"))
+        if not row.get("gpt_v2_status"):
+            continue
+        legacy_c_status = _json_object(row.get("intraday_snapshot_metadata_json")).get("gpt_shadow_legacy_c_status")
+        entries.append({
+            "legacy_c": _finite(row.get("c_reversal_score")) if legacy_c_status in (None, "analyzed") else None,
+            "legacy_gpt": _finite(row.get("a_gpt_buy_score")),
+            "legacy_final": _finite(row.get("a_final_score")),
+            "experimental_c": _finite(analysis.get("c_v2_score")),
+            "v2_gpt": _finite(analysis.get("gpt_buy_score_v2")),
+            "v2_final": _finite(analysis.get("final_score_v2")),
+            "outcome": _json_object(row.get("gpt_v2_outcome_json")),
+            "strict": analysis.get("strict_match_eligible") is True,
+            "state": row["gpt_v2_status"], "run": row["run_key"],
+            "regime": row.get("market_regime_key") or "unknown",
+            "events": {event["event_type"] for event in analysis.get("corporate_events", [])} or {"unknown"},
+            "v2_performance": analysis.get("performance") or {},
+        })
+    variants = {}
+    matched = [row for row in entries if row["strict"] and all(row[key] is not None
+               for key in ("legacy_c", "legacy_gpt", "experimental_c", "v2_gpt"))]
+    for c in ("legacy_c", "experimental_c"):
+        for gpt in ("legacy_gpt", "v2_gpt"):
+            scored = [row for row in entries if row[c] is not None and row[gpt] is not None]
+            eligible = [row for row in scored if row[c] >= 65 and row[gpt] >= 60
+                        and round(row[c] * .75 + row[gpt] * .25, 2) >= 65]
+            matched_eligible = [row for row in eligible if row in matched]
+            variants[f"{c}+{gpt}"] = {
+                "score_coverage": {"present": len(scored), "total": len(entries)},
+                "eligible_candidates": len(eligible), "strict_matched": len(matched),
+                "strict_matched_eligible": len(matched_eligible),
+                "strategy_specific": {period: _outcome_metrics(eligible, period) for period in ("short", "long")},
+                "matched": {period: _outcome_metrics(matched_eligible, period) for period in ("short", "long")},
+            }
+    run_v2 = {}
+    for row in entries:
+        total = _finite(row["v2_performance"].get("total_pipeline_ms"))
+        if total is not None:
+            run_v2[row["run"]] = total
+    groups = {}
+    for key in ("regime", "events"):
+        values = {row["regime"] for row in entries} if key == "regime" else {
+            event for row in entries for event in row["events"]}
+        groups[key] = {}
+        for value in sorted(values):
+            group = [row for row in entries if (row[key] == value if key == "regime" else value in row[key])]
+            groups[key][value] = {period: _outcome_metrics(group, period) for period in ("short", "long")}
+    comparisons = {}
+    for old, new in (("legacy_c", "experimental_c"), ("legacy_gpt", "v2_gpt"), ("legacy_final", "v2_final")):
+        comparable = [row for row in matched if row[old] is not None and row[new] is not None]
+        comparisons[f"{old}_vs_{new}"] = {
+            "n": len(comparable), "strict_matched_total": len(matched),
+            "mean_change": fmean(row[new] - row[old] for row in comparable) if comparable else None,
+        }
+    return {
+        "version": "pr144-v1", "evaluation_from": evaluation_from.isoformat(),
+        "candidate_count": len(entries), "strict_matched_count": len(matched),
+        "status_coverage": dict(Counter(row["state"] for row in entries)),
+        "market_regime_coverage": dict(Counter(row["regime"] for row in entries)),
+        "corporate_event_coverage": dict(Counter(event for row in entries for event in row["events"])),
+        "v1_parallel_decision_latency": _latency([value for row in run_v1.values()
+            if row.get("parallel_execution_enabled") and (value := _finite(row.get("v1_decision_ready_ms"))) is not None]),
+        "v1_only_decision_latency": _latency([value for row in run_v1.values()
+            if row.get("parallel_execution_enabled") is False
+            and (value := _finite(row.get("v1_decision_ready_ms"))) is not None]),
+        "parallel_pipeline_latency": _latency(list(run_v2.values())),
+        "shadow_api_requests": {
+            key: sum(row["v2_performance"].get(key, 0) for row in entries)
+            for key in ("kis_request_count", "openai_request_count", "cache_hit_count", "cache_miss_count")
+        },
+        "variants": variants,
+        "matched_score_comparisons": comparisons,
+        "grouped_outcomes": groups,
+    }
 
 
 def _date_argument(value: str) -> date:
@@ -273,6 +422,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--gpt-min-score", type=_score_argument, default=60)
     parser.add_argument("--final-min-score", type=_score_argument, default=65)
     parser.add_argument("--passed-only", action="store_true")
+    parser.add_argument("--v2-summary", type=Path, help="Optional JSON path for fixed-gate V2 comparisons")
+    parser.add_argument("--evaluation-from", type=_date_argument, help="First day of the chronological holdout")
     return parser
 
 
@@ -314,6 +465,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     label = _date_filters(parser, args)
     paths = _output_paths(parser, args, label)
+    if args.v2_summary and args.evaluation_from is None:
+        parser.error("--v2-summary requires --evaluation-from")
+    if args.v2_summary and (args.passed_only or args.official_only):
+        parser.error("--v2-summary requires unfiltered candidate coverage")
+    if args.v2_summary and args.v2_summary.resolve() in {path.resolve() for path in paths}:
+        parser.error("--v2-summary must be a separate file")
     try:
         database = _database_path(args.database).expanduser().resolve()
         # An output path must never overwrite the database, WAL, or journal.
@@ -321,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
         if any(
             path.resolve() in protected
             or any(path.exists() and source.exists() and path.samefile(source) for source in protected)
-            for path in paths
+            for path in [*paths, *([args.v2_summary] if args.v2_summary else [])]
         ):
             raise ValueError("Output path must not overwrite the database or SQLite sidecar files")
         engine = create_read_only_engine(database)
@@ -342,6 +499,12 @@ def main(argv: list[str] | None = None) -> int:
                 with path.open("w", encoding="utf-8", newline="\n") as handle:
                     json.dump(rows, handle, ensure_ascii=False, indent=2, allow_nan=False)
                     handle.write("\n")
+        if args.v2_summary:
+            args.v2_summary.parent.mkdir(parents=True, exist_ok=True)
+            with args.v2_summary.open("w", encoding="utf-8", newline="\n") as handle:
+                json.dump(v2_comparisons(rows, args.evaluation_from), handle, ensure_ascii=False,
+                          indent=2, allow_nan=False)
+                handle.write("\n")
     except (ValueError, OSError, SQLAlchemyError) as exc:
         print(f"Export failed: {exc}", file=sys.stderr)
         return 1

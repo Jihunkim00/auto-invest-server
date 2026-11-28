@@ -20,6 +20,7 @@ class AutomationProfileWriteRequest(BaseModel):
     universe: dict[str, Any] = Field(default_factory=dict)
     entry: dict[str, Any] = Field(default_factory=dict)
     monitoring: dict[str, Any] = Field(default_factory=dict)
+    gpt_analysis: dict[str, Any] = Field(default_factory=dict)
     exit: dict[str, Any] = Field(default_factory=dict)
     operation: dict[str, Any] = Field(default_factory=dict)
     settings: dict[str, Any] = Field(default_factory=dict)

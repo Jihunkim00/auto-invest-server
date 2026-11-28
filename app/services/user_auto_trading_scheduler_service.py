@@ -166,7 +166,7 @@ class UserAutoTradingCandidateService:
                     min_price_krw=min_price_krw,
                     max_price_krw=max_price_krw,
                     profile_snapshot_items=snapshot.get("items") or [],
-                    profile_snapshot_context=snapshot_data,
+                    profile_snapshot_context={**snapshot_data, "_effective_schedule_profile": profile},
                     canonical_profile_pipeline=True,
                     decision_timestamp=now,
                     account_positions=(account_snapshot or {}).get('positions', []),

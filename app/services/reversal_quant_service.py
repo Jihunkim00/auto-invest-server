@@ -32,8 +32,15 @@ class ReversalQuantService:
                decision_timestamp=decision)
             for m in (15, 30, 60)
         }
+        return self._score_frames(current_price, daily, frames, immediate=15)
+
+    def score_experimental(self, *, current_price, daily_bars, frames, decision_timestamp):
+        daily = _normalize_daily(daily_bars, before=_as_kst(decision_timestamp).date())
+        return self._score_frames(current_price, daily, frames, immediate=10)
+
+    def _score_frames(self, current_price, daily, frames, *, immediate):
         d = _daily_metrics(daily)
-        f30, f15, f60 = (_frame_metrics(frames[m]) for m in (30, 15, 60))
+        f30, f15, f60 = (_frame_metrics(frames[m]) for m in (30, immediate, 60))
         price = _positive(current_price)
         parts = {
             'oversold_score_c': _oversold_score(d),
@@ -44,13 +51,13 @@ class ReversalQuantService:
         }
         score = _bounded(sum((parts[k] or 0.0) * w for k, w in WEIGHTS.items()) / 100.0)
         risk = _continuation_risk(d, f30, f15, f60)
-        quality = _data_quality(daily, frames, parts)
+        quality = _data_quality(daily, frames, parts, immediate=immediate)
         state = _state(score, risk, parts, d, f30, f15)
         direction = 'bullish' if score >= 58 and risk < 65 else 'bearish' if risk >= 60 and score < 50 else 'neutral'
         confidence = round(min(1.0, max(0.0, quality * (0.35 + score / 150.0))), 4)
         notes = [
             'Deterministic reversal score, not a future-price probability.',
-            'Daily context, primary 30m confirmation, immediate 15m confirmation; 60m supporting only.',
+            f'Daily context, primary 30m confirmation, immediate {immediate}m confirmation; 60m supporting only.',
             'Incomplete/future intraday buckets excluded with B conservative resampling.',
         ]
         missing = [k for k, v in parts.items() if v is None]
@@ -61,6 +68,7 @@ class ReversalQuantService:
         if (d.get('rsi') or 100) <= 30 and (d.get('rsi_slope') or 0) <= 0:
             notes.append('oversold_without_daily_rsi_recovery')
         return {
+            'c_score_version': 'c-15m30m-v1' if immediate == 15 else 'c-10m30m-v2',
             'reversal_score_c': score,
             **{k: None if v is None else _bounded(v) for k, v in parts.items()},
             'downtrend_continuation_risk_c': risk,
@@ -68,9 +76,9 @@ class ReversalQuantService:
             'confidence_c': confidence, 'data_quality_c': quality,
             'c_reason': f'C {state}; score={score:.2f}; continuation_risk={risk:.2f}; quality={quality:.2f}',
             'c_notes': notes,
-            'timeframe_bar_counts': {'daily': len(daily), **{f'{m}m': len(frames[m]) for m in (15,30,60)}},
+            'timeframe_bar_counts': {'daily': len(daily), **{f'{m}m': len(frames[m]) for m in (immediate,30,60)}},
             'indicator_snapshot': {
-                'daily': d, '15m': f15, '30m': f30, '60m': f60,
+                'daily': d, f'{immediate}m': f15, '30m': f30, '60m': f60,
                 'current_price': _round(price), 'weights': dict(WEIGHTS),
             },
         }
@@ -222,9 +230,9 @@ def _state(score, risk, parts, daily, f30, f15):
     return 'oversold_only' if oversold is not None and oversold >= 55 else 'neutral'
 
 
-def _data_quality(daily, frames, parts):
+def _data_quality(daily, frames, parts, *, immediate=15):
     daily_quality = min(1.0, len(daily)/40.0)
-    frame_quality = sum(len(frames[m]) >= 2 for m in (15,30,60))/3.0
+    frame_quality = sum(len(frames[m]) >= 2 for m in (immediate,30,60))/3.0
     component_quality = sum(WEIGHTS[k] for k,v in parts.items() if v is not None)/100.0
     return round(min(1.0, max(0.0, (daily_quality+frame_quality+component_quality)/3.0)),4)
 
